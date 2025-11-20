@@ -1,7 +1,8 @@
+
 import React from 'react';
 import { Player, PlayerStatus } from '../types';
 import CardComponent from './Card';
-import { User, Bot, Eye } from 'lucide-react';
+import { Eye } from 'lucide-react';
 
 interface PlayerSeatProps {
   player: Player;
@@ -10,11 +11,16 @@ interface PlayerSeatProps {
   position: 'bottom' | 'top' | 'left' | 'right';
   isWinner?: boolean;
   showCards?: boolean; // Forced show (e.g. showdown)
+  isMe?: boolean;
 }
 
-const PlayerSeat: React.FC<PlayerSeatProps> = ({ player, isActive, isDealer, position, isWinner, showCards }) => {
+const PlayerSeat: React.FC<PlayerSeatProps> = ({ player, isActive, isDealer, position, isWinner, showCards, isMe }) => {
   const isFolded = player.status === PlayerStatus.Folded;
   const isLost = player.status === PlayerStatus.Lost;
+
+  // Determine if the cards are actually visible to the user (Face Up)
+  // This happens if it's a showdown OR if it's "Me" (not a bot) and I have clicked "Look"
+  const isRevealed = showCards || (player.hasSeenCards && isMe);
 
   // Dynamic classes based on position
   const positionClasses = {
@@ -25,11 +31,15 @@ const PlayerSeat: React.FC<PlayerSeatProps> = ({ player, isActive, isDealer, pos
   };
 
   // Avatar Image Source
+  // Use avatarId if available, otherwise fallback to name as seed
+  const seed = player.avatarId ? `avatar-${player.avatarId}` : player.name;
+  
+  // Using different collections for Bots vs Humans for clear visual distinction
   const avatarUrl = player.isBot 
-    ? `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(player.name)}`
-    : `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(player.name)}`;
+    ? `https://api.dicebear.com/9.x/bottts-neutral/svg?seed=${encodeURIComponent(seed)}`
+    : `https://api.dicebear.com/9.x/adventurer/svg?seed=${encodeURIComponent(seed)}`;
 
-  // Safe hand access: Ensure array exists and filter out any potential null/undefined slots
+  // Safe hand access
   const visibleHand = (player.hand || []).filter(c => c !== undefined && c !== null);
 
   return (
@@ -51,23 +61,28 @@ const PlayerSeat: React.FC<PlayerSeatProps> = ({ player, isActive, isDealer, pos
 
       {/* Avatar Section */}
       <div className={`relative w-16 h-16 md:w-20 md:h-20 rounded-full border-4 flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] z-10 bg-slate-800
-        ${isActive ? 'border-yellow-400 ring-4 ring-yellow-400/30 scale-110' : 'border-gray-600'}
-        ${isWinner ? 'border-green-400 ring-4 ring-green-400/60' : ''}
+        ${isActive ? 'border-yellow-400 ring-4 ring-yellow-400/30 scale-110 shadow-[0_0_30px_rgba(250,204,21,0.4)]' : 'border-gray-600'}
+        ${isWinner ? 'border-green-400 ring-4 ring-green-400/60 scale-110 shadow-[0_0_30px_rgba(74,222,128,0.6)]' : ''}
         ${isFolded || isLost ? 'opacity-60 grayscale' : ''}
         transition-all duration-300
       `}>
         <img src={avatarUrl} alt={player.name} className="w-full h-full rounded-full p-1" />
         
+        {/* Active Pulse Effect */}
+        {isActive && (
+            <div className="absolute inset-0 rounded-full border-2 border-yellow-400 animate-ping opacity-75"></div>
+        )}
+
         {/* Badges */}
         {player.hasSeenCards && !isFolded && !isLost && (
-          <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white w-6 h-6 rounded-full flex items-center justify-center border-2 border-slate-800 z-20">
+          <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white w-6 h-6 rounded-full flex items-center justify-center border-2 border-slate-800 z-20 animate-in zoom-in duration-300">
             <Eye size={12} />
           </div>
         )}
       </div>
 
       {/* Info Box */}
-      <div className={`mt-12 absolute top-4 bg-black/80 backdrop-blur-sm px-3 py-1 rounded-lg text-center border min-w-[80px] shadow-lg ${isActive ? 'border-yellow-500/50' : 'border-gray-700'}`}>
+      <div className={`mt-12 absolute top-4 bg-black/80 backdrop-blur-sm px-3 py-1 rounded-lg text-center border min-w-[80px] shadow-lg transition-colors duration-300 ${isActive ? 'border-yellow-500/50 bg-black/90' : 'border-gray-700'}`}>
         <div className="font-bold text-xs text-gray-100 truncate max-w-[100px]">{player.name}</div>
         <div className="text-yellow-400 text-xs font-mono flex items-center justify-center gap-1">
            <div className="w-3 h-3 rounded-full bg-yellow-500 border border-yellow-200 shadow-sm"></div>
@@ -76,23 +91,45 @@ const PlayerSeat: React.FC<PlayerSeatProps> = ({ player, isActive, isDealer, pos
       </div>
 
       {/* Cards Layout */}
-      <div className="flex -space-x-8 mt-14 z-0 h-24 items-center justify-center relative">
-        {visibleHand.map((card, idx) => (
-          <div 
-            key={idx} 
-            className={`transform transition-all duration-500 origin-bottom-left hover:-translate-y-4
-                ${isFolded ? 'translate-y-2 rotate-12 opacity-60 scale-90' : ''}
-                ${idx === 0 ? '-rotate-6' : idx === 1 ? 'z-10 -mt-2' : 'rotate-6'}
-            `}
-          >
-             <CardComponent 
-              card={card} 
-              hidden={!showCards && (!player.hasSeenCards || player.isBot)} 
-              small
-              className="shadow-xl"
-             />
-          </div>
-        ))}
+      <div 
+        className={`flex mt-14 z-0 h-24 items-center justify-center relative transition-all duration-500 ease-out
+          ${isRevealed ? 'space-x-1 md:space-x-2' : '-space-x-6 md:-space-x-8'}
+        `}
+      >
+        {visibleHand.map((card, idx) => {
+          // Calculate transforms based on state
+          let transformClass = '';
+          let zIndexClass = 'z-0';
+          
+          if (isFolded) {
+             // Folded: messily stacked, grayed out
+             transformClass = 'translate-y-2 rotate-12 opacity-60 scale-90';
+          } else if (isRevealed) {
+             // Revealed/Looking: Spread out clearly, minimal rotation
+             if (idx === 0) { transformClass = '-rotate-2 translate-y-1'; zIndexClass = 'z-0'; }
+             if (idx === 1) { transformClass = '-translate-y-1'; zIndexClass = 'z-10'; } // Center pops up slightly
+             if (idx === 2) { transformClass = 'rotate-2 translate-y-1'; zIndexClass = 'z-20'; }
+          } else {
+             // Hidden/Dealing: Tight fan
+             if (idx === 0) { transformClass = '-rotate-12 translate-x-2'; zIndexClass = 'z-0'; }
+             if (idx === 1) { transformClass = '-mt-4'; zIndexClass = 'z-10'; }
+             if (idx === 2) { transformClass = 'rotate-12 -translate-x-2'; zIndexClass = 'z-20'; }
+          }
+
+          return (
+            <div 
+              key={`${idx}-${card.rank}-${card.suit}`} 
+              className={`transform transition-all duration-500 origin-bottom ${transformClass} ${zIndexClass} hover:z-30 hover:-translate-y-2 cursor-default`}
+            >
+               <CardComponent 
+                card={card} 
+                hidden={!isRevealed} 
+                small
+                className="shadow-2xl"
+               />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

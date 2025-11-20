@@ -66,7 +66,7 @@ export enum Difficulty {
 export interface LogEntry {
   id: string;
   text: string;
-  type: 'info' | 'action' | 'win' | 'gemini';
+  type: 'info' | 'action' | 'win';
 }
 
 export interface AnalysisResult {

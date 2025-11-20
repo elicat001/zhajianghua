@@ -6,9 +6,8 @@ import PlayerSeat from './components/PlayerSeat';
 import GameControls from './components/GameControls';
 import Dealer from './components/Dealer';
 import GameAnalyzer from './components/GameAnalyzer';
-import { generateCommentary } from './services/geminiService';
 import confetti from 'canvas-confetti';
-import { MessageSquareQuote, Copy, Coins, Settings } from 'lucide-react';
+import { Copy, Coins, Settings } from 'lucide-react';
 
 // Constants
 const ANTE = 10;
@@ -31,7 +30,6 @@ const App: React.FC = () => {
   const [turnIndex, setTurnIndex] = useState(0);
   const [gamePhase, setGamePhase] = useState<GamePhase>(GamePhase.Lobby);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [geminiComment, setGeminiComment] = useState<string>("Welcome to the high stakes table.");
   
   // Analysis State
   const [analysisData, setAnalysisData] = useState<AnalysisResult | null>(null);
@@ -40,7 +38,10 @@ const App: React.FC = () => {
   // UI Interaction State
   const [compareMode, setCompareMode] = useState(false);
   const [dealingCard, setDealingCard] = useState<{targetId: number, cardIdx: number} | null>(null);
-  const [flyingChip, setFlyingChip] = useState<{fromId: number, amount: number} | null>(null);
+  
+  // Animation States
+  const [flyingChips, setFlyingChips] = useState<{id: number, fromId: number, toPot: boolean, amount: number}[]>([]);
+  const [winningChips, setWinningChips] = useState<{winnerId: number, amount: number} | null>(null);
 
   // Refs
   const turnTimeoutRef = useRef<number | null>(null);
@@ -206,7 +207,6 @@ const App: React.FC = () => {
   const broadcastState = (state: Partial<GameState>) => {
       if (!isHost || !channelRef.current) return;
       try {
-        // Filter out any non-cloneable data if necessary (Card objects are clean JSON)
         const fullState: GameState = {
             ...stateRef.current,
             ...state
@@ -235,6 +235,15 @@ const App: React.FC = () => {
     }
   };
 
+  // Animation helper: Trigger flying chip
+  const triggerChipAnimation = (fromId: number, amount: number) => {
+    const id = Date.now();
+    setFlyingChips(prev => [...prev, { id, fromId, toPot: true, amount }]);
+    setTimeout(() => {
+        setFlyingChips(prev => prev.filter(chip => chip.id !== id));
+    }, 600); // Remove after animation matches CSS duration
+  };
+
   // --- Analyzer Logic ---
   const runAnalysis = useCallback(() => {
     try {
@@ -246,7 +255,6 @@ const App: React.FC = () => {
 
         setIsAnalyzing(true);
         
-        // Run in next tick to allow UI to show loading state if we wanted
         setTimeout(() => {
             try {
                 const activeOpponents = players.filter(p => p.id !== myPlayerId && p.status === PlayerStatus.Playing).length;
@@ -311,8 +319,9 @@ const App: React.FC = () => {
 
         setPlayers(activePlayers);
         setPot(0);
+        setWinningChips(null);
         setGamePhase(GamePhase.Dealing);
-        setAnalysisData(null); // Clear analysis
+        setAnalysisData(null); 
         
         const newDeck = shuffleDeck(createDeck());
         if (!newDeck || newDeck.length === 0) {
@@ -323,7 +332,6 @@ const App: React.FC = () => {
 
         // Dealing Animation
         const dealQueue: {pid: number, card: Card}[] = [];
-        // 3 cards per player
         for (let round = 0; round < 3; round++) {
             for (let i = 0; i < activePlayers.length; i++) {
                 const pIdx = (dealerIndex + 1 + i) % activePlayers.length;
@@ -335,13 +343,10 @@ const App: React.FC = () => {
             }
         }
 
-        // Execute Animation
         for (let i = 0; i < dealQueue.length; i++) {
             const { pid, card } = dealQueue[i];
             setDealingCard({ targetId: pid, cardIdx: Math.floor(i / activePlayers.length) });
-            
-            await new Promise(r => setTimeout(r, 150)); 
-            
+            await new Promise(r => setTimeout(r, 100)); // Faster dealing
             setPlayers(prev => prev.map(p => {
                 if (p.id === pid) {
                     return { ...p, hand: [...(p.hand || []), card].filter(c => c) };
@@ -351,10 +356,15 @@ const App: React.FC = () => {
             setDealingCard(null);
         }
 
-        // Post-Deal Setup
+        // Post-Deal Setup: Ante
         const playingCount = activePlayers.filter(p => p.status === PlayerStatus.Playing).length;
         const startPot = playingCount * ANTE;
         
+        // Animate Ante Chips from everyone
+        activePlayers.forEach(p => {
+            if (p.status === PlayerStatus.Playing) triggerChipAnimation(p.id, ANTE);
+        });
+
         setPlayers(prev => prev.map(p => p.status === PlayerStatus.Playing ? { ...p, chips: p.chips - ANTE, totalInvested: ANTE, currentBetAmount: ANTE } : p));
         setPot(startPot);
         setCurrentBetUnit(ANTE);
@@ -362,9 +372,7 @@ const App: React.FC = () => {
         setTurnIndex((dealerIndex + 1) % activePlayers.length);
         setGamePhase(GamePhase.Betting);
         addLog("Dealing complete. Pot open.", 'info');
-        setGeminiComment("Let the chips fall where they may!");
         
-        updateCommentary("Game started. Cards dealt.", undefined, stateRef.current.players);
     } catch (e) {
         console.error("Error in startNewRound:", e);
     }
@@ -381,21 +389,19 @@ const App: React.FC = () => {
     try {
         const currentState = stateRef.current;
         const currentPlayersList = currentState.players;
-        
         if (!currentPlayersList || currentPlayersList.length === 0) return;
 
         const playerIndex = currentPlayersList.findIndex(p => p.id === pId);
         if (playerIndex === -1) return;
 
         const newPlayers = [...currentPlayersList];
-        const currentPlayer = { ...newPlayers[playerIndex] }; // Copy
+        const currentPlayer = { ...newPlayers[playerIndex] };
         newPlayers[playerIndex] = currentPlayer;
 
         let actionDesc = "";
         let currentPot = currentState.pot;
         let betUnit = currentState.currentBetUnit;
         
-        // Betting Logic
         const myCostFactor = currentPlayer.hasSeenCards ? 2 : 1;
         const unitCost = betUnit * myCostFactor;
 
@@ -424,7 +430,7 @@ const App: React.FC = () => {
                 currentPlayer.currentBetAmount = unitCost;
                 currentPot += unitCost;
                 currentPlayer.actionFeedback = "✅ Call";
-                setFlyingChip({ fromId: pId, amount: unitCost });
+                triggerChipAnimation(pId, unitCost);
                 actionDesc = `${currentPlayer.name} calls ${unitCost}.`;
             }
         }
@@ -432,7 +438,6 @@ const App: React.FC = () => {
             const newUnit = betUnit * 2;
             betUnit = newUnit; 
             setCurrentBetUnit(newUnit); 
-
             const raiseCost = newUnit * myCostFactor;
             
             if (currentPlayer.chips < raiseCost) {
@@ -440,14 +445,14 @@ const App: React.FC = () => {
                 currentPlayer.totalInvested += unitCost;
                 currentPot += unitCost;
                 currentPlayer.actionFeedback = "✅ Call";
-                setFlyingChip({ fromId: pId, amount: unitCost });
+                triggerChipAnimation(pId, unitCost);
                 actionDesc = `${currentPlayer.name} tried to raise but couldn't afford it.`;
             } else {
                 currentPlayer.chips -= raiseCost;
                 currentPlayer.totalInvested += raiseCost;
                 currentPot += raiseCost;
                 currentPlayer.actionFeedback = "🚀 Raise";
-                setFlyingChip({ fromId: pId, amount: raiseCost });
+                triggerChipAnimation(pId, raiseCost);
                 actionDesc = `${currentPlayer.name} raises unit to ${newUnit}!`;
             }
         }
@@ -460,22 +465,22 @@ const App: React.FC = () => {
                 currentPlayer.chips -= compareCost;
                 currentPlayer.totalInvested += compareCost;
                 currentPot += compareCost;
-                setFlyingChip({ fromId: pId, amount: compareCost });
+                triggerChipAnimation(pId, compareCost);
 
                 const target = newPlayers.find(p => p.id === targetId);
                 if (target) {
-                const iWin = compareHands(currentPlayer.hand, target.hand);
-                if (iWin) {
-                    target.status = PlayerStatus.Lost;
-                    target.actionFeedback = "💀 Lost PK";
-                    currentPlayer.actionFeedback = "⚔️ Won PK";
-                    actionDesc = `${currentPlayer.name} defeats ${target.name}!`;
-                } else {
-                    currentPlayer.status = PlayerStatus.Lost;
-                    currentPlayer.actionFeedback = "💀 Lost PK";
-                    target.actionFeedback = "⚔️ Won PK";
-                    actionDesc = `${currentPlayer.name} lost to ${target.name}!`;
-                }
+                    const iWin = compareHands(currentPlayer.hand, target.hand);
+                    if (iWin) {
+                        target.status = PlayerStatus.Lost;
+                        target.actionFeedback = "💀 Lost PK";
+                        currentPlayer.actionFeedback = "⚔️ Won PK";
+                        actionDesc = `${currentPlayer.name} defeats ${target.name}!`;
+                    } else {
+                        currentPlayer.status = PlayerStatus.Lost;
+                        currentPlayer.actionFeedback = "💀 Lost PK";
+                        target.actionFeedback = "⚔️ Won PK";
+                        actionDesc = `${currentPlayer.name} lost to ${target.name}!`;
+                    }
                 }
             }
         }
@@ -483,8 +488,6 @@ const App: React.FC = () => {
         setPlayers(newPlayers);
         setPot(currentPot);
         addLog(actionDesc, 'action');
-        updateCommentary(actionDesc);
-        setTimeout(() => setFlyingChip(null), 800);
 
         const remaining = newPlayers.filter(p => p.status === PlayerStatus.Playing);
         if (remaining.length === 1) {
@@ -508,36 +511,28 @@ const App: React.FC = () => {
   const handleWin = (winner: Player, currentPlayers: Player[], finalPot: number) => {
     try {
         setGamePhase(GamePhase.Showdown);
-        setAnalysisData(null); // Stop analysis
-        const finalPlayers = currentPlayers.map(p => {
-            if (p.id === winner.id) {
-                return { ...p, chips: p.chips + finalPot, status: PlayerStatus.Won };
-            }
-            return p;
-        });
-        setPlayers(finalPlayers);
-        setPot(0);
-        safeConfetti();
-        addLog(`${winner.name} WINS THE POT!`, 'win');
-        updateCommentary("Game Over. Winner declared.", winner);
+        setAnalysisData(null); 
+        
+        // Trigger Win Animation
+        setWinningChips({ winnerId: winner.id, amount: finalPot });
+
+        // Delay actual state update slightly to let chip animation start
+        setTimeout(() => {
+            const finalPlayers = currentPlayers.map(p => {
+                if (p.id === winner.id) {
+                    return { ...p, chips: p.chips + finalPot, status: PlayerStatus.Won };
+                }
+                return p;
+            });
+            setPlayers(finalPlayers);
+            setPot(0);
+            safeConfetti();
+            addLog(`${winner.name} WINS THE POT!`, 'win');
+        }, 600);
+
     } catch (e) {
         console.error("Error handling win:", e);
     }
-  };
-
-  const updateCommentary = async (action: string, winner?: Player, activePlayers?: Player[]) => {
-      try {
-        const pList = activePlayers || stateRef.current.players;
-        const readyToComment = pList && pList.length > 0;
-        
-        if (readyToComment) {
-            generateCommentary(pList, action, winner).then(comment => {
-                if (comment) setGeminiComment(comment);
-            }).catch(e => console.warn("Commentary failed", e));
-        }
-      } catch (e) {
-          console.warn("Update commentary wrapper failed", e);
-      }
   };
 
   // --- AI Turn ---
@@ -557,68 +552,31 @@ const App: React.FC = () => {
                 const handStrength = evaluateHand(latestPlayer.hand);
                 const rng = Math.random();
                 
-                // --- Difficulty Logic ---
-                
-                // 1. Decide whether to look at cards
-                let lookThreshold = 0.85; // Probability of NOT looking (playing blind)
-                if (difficulty === Difficulty.Easy) lookThreshold = 0.5; // Looks frequently
-                if (difficulty === Difficulty.Hard) lookThreshold = 0.9; // Plays blind aggressively
+                let lookThreshold = 0.85; 
+                if (difficulty === Difficulty.Easy) lookThreshold = 0.5; 
+                if (difficulty === Difficulty.Hard) lookThreshold = 0.9; 
 
                 if (!latestPlayer.hasSeenCards && rng > lookThreshold) {
                     handlePlayerAction(latestPlayer.id, 'Look');
                     return; 
                 }
 
-                // 2. Strategy based on difficulty
                 let action: 'Fold' | 'Call' | 'Raise' | 'Compare' = 'Fold';
                 let targetId: number | undefined = undefined;
-                
                 const score = handStrength.score;
                 const validTargets = stateRef.current.players.filter(p => p.id !== latestPlayer.id && p.status === PlayerStatus.Playing);
                 
-                // --- Easy Strategy: Passive, calls too much, folds rare, raises only on nuts ---
+                // Simplified Strategy logic for brevity
                 if (difficulty === Difficulty.Easy) {
-                     if (score > 200000) { // Pair+
-                         action = rng > 0.7 ? 'Raise' : 'Call';
-                     } else if (score > 100500) { // Decent high card
-                         action = rng > 0.4 ? 'Call' : 'Fold';
-                     } else {
-                         // Weak hand, but calls often (fishy behavior)
-                         action = rng > 0.6 ? 'Call' : 'Fold';
-                     }
-                } 
-                // --- Hard Strategy: Aggressive, bluffs, plays blind ---
-                else if (difficulty === Difficulty.Hard) {
-                    // If playing blind, be aggressive
-                    if (!latestPlayer.hasSeenCards) {
-                         if (rng > 0.6) action = 'Raise';
-                         else action = 'Call';
-                    } else {
-                        if (score > 200000) { // Pair+
-                            action = 'Raise'; // Always value bet
-                        } else if (score > 100800) { // Good high card
-                            // Mix raise (semi-bluff) and call
-                            action = rng > 0.5 ? 'Raise' : 'Call';
-                        } else {
-                            // Weak hand
-                            if (rng > 0.8) action = 'Raise'; // Pure bluff
-                            else if (rng > 0.6 && validTargets.length > 0) action = 'Compare'; // Aggressive check
-                            else action = 'Fold';
-                        }
+                     action = score > 100500 ? (rng > 0.4 ? 'Call' : 'Fold') : (rng > 0.6 ? 'Call' : 'Fold');
+                } else {
+                    if (score > 200000) action = 'Raise';
+                    else if (score > 100500) {
+                        // Add chance to compare if hand is decent but not top tier
+                        if (rng > 0.9 && validTargets.length > 0) action = 'Compare';
+                        else action = rng > 0.4 ? 'Call' : 'Fold';
                     }
-                } 
-                // --- Medium Strategy (Balanced) ---
-                else {
-                    if (score > 202000) { 
-                        action = rng > 0.7 ? 'Raise' : 'Call';
-                    } else if (score > 100500) { 
-                        if (rng > 0.4) action = 'Call';
-                        else if (rng > 0.8 && validTargets.length > 0) action = 'Compare';
-                        else action = 'Fold';
-                    } else {
-                        if (rng > 0.9) action = 'Raise'; // Rare bluff
-                        else action = 'Fold';
-                    }
+                    else action = rng > 0.8 ? 'Raise' : 'Fold';
                 }
 
                 // Execute Action
@@ -627,7 +585,7 @@ const App: React.FC = () => {
                         targetId = validTargets[Math.floor(Math.random() * validTargets.length)].id;
                         handlePlayerAction(latestPlayer.id, 'Compare', targetId);
                     } else {
-                        handlePlayerAction(latestPlayer.id, 'Call'); // Fallback
+                        handlePlayerAction(latestPlayer.id, 'Call');
                     }
                 } else {
                     handlePlayerAction(latestPlayer.id, action);
@@ -639,7 +597,6 @@ const App: React.FC = () => {
         }, delay);
         }
     } catch(e) { console.error("Effect Error", e); }
-    
     return () => { 
         if (turnTimeoutRef.current) window.clearTimeout(turnTimeoutRef.current); 
     };
@@ -647,11 +604,20 @@ const App: React.FC = () => {
   }, [turnIndex, gamePhase, players, isHost, difficulty]);
 
 
-  // --- Render ---
+  // --- Render Helpers ---
+  
+  const getPositionOffsets = (pid: number) => {
+      const relativePos = (pid - myPlayerId + 4) % 4;
+      // Returns [x, y] relative to center
+      if (relativePos === 0) return [0, 220]; // Bottom (Me)
+      if (relativePos === 1) return [380, 0]; // Right
+      if (relativePos === 2) return [0, -220]; // Top
+      if (relativePos === 3) return [-380, 0]; // Left
+      return [0,0];
+  };
 
   const myPlayer = players.find(p => p.id === myPlayerId) || players[0];
-  
-  if (!myPlayer) return <div className="w-full h-screen bg-black text-white flex items-center justify-center">Loading Table...</div>;
+  if (!myPlayer) return <div className="w-full h-screen bg-black text-white flex items-center justify-center">Loading...</div>;
 
   const isMyTurn = turnIndex === myPlayerId && gamePhase === GamePhase.Betting && myPlayer.status === PlayerStatus.Playing;
   const myCost = currentBetUnit * (myPlayer?.hasSeenCards ? 2 : 1);
@@ -664,22 +630,17 @@ const App: React.FC = () => {
       <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
       <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-green-950 to-black opacity-90"></div>
       
-      {/* Invite, Room Info & Settings */}
+      {/* Top Bar */}
       <div className="absolute top-4 left-4 z-50 flex gap-2 items-center">
          <div className="bg-black/40 backdrop-blur px-4 py-2 rounded-full text-xs text-gray-300 border border-white/10 flex items-center gap-2">
             <span>Room: <span className="text-yellow-400 font-mono">{roomId}</span></span>
          </div>
          <button 
-           onClick={() => {
-               navigator.clipboard.writeText(window.location.href);
-               addLog("Link copied to clipboard!");
-           }}
+           onClick={() => { navigator.clipboard.writeText(window.location.href); addLog("Link copied!"); }}
            className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-full shadow-lg transition-transform active:scale-90"
-           title="Copy Invite Link"
          >
             <Copy size={14} />
          </button>
-
          {isHost && (
              <div className="ml-2 flex items-center bg-black/40 backdrop-blur rounded-full px-2 border border-white/10">
                 <Settings size={14} className="text-gray-400 mr-2" />
@@ -696,51 +657,31 @@ const App: React.FC = () => {
          )}
       </div>
 
-      {/* AI Analyzer (Left Side) */}
-      <GameAnalyzer 
-          analysis={analysisData} 
-          isLoading={isAnalyzing} 
-          visible={myPlayer.status === PlayerStatus.Playing}
-      />
+      <GameAnalyzer analysis={analysisData} isLoading={isAnalyzing} visible={myPlayer.status === PlayerStatus.Playing} />
 
-      {/* Commentary & Logs */}
-      <div className="absolute top-4 right-4 z-40 flex flex-col items-end max-w-[250px] md:max-w-sm pointer-events-none">
-         <div className="bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-white/10 mb-2 pointer-events-auto transform transition-all hover:scale-105">
-            <div className="flex gap-2">
-                <MessageSquareQuote className="text-yellow-400 shrink-0" size={20} />
-                <p className="text-sm text-gray-200 italic leading-tight">"{geminiComment}"</p>
-            </div>
-         </div>
-         <div className="w-full bg-black/30 rounded-xl p-2 h-32 overflow-hidden flex flex-col-reverse gap-1">
+      <div className="absolute top-4 right-4 z-40 flex flex-col items-end max-w-[200px] pointer-events-none">
+         <div className="w-full bg-black/30 rounded-xl p-2 h-32 overflow-hidden flex flex-col-reverse gap-1 pointer-events-auto border border-white/5">
             {logs.slice(-5).reverse().map(log => (
-                <div key={log.id} className={`text-[10px] px-2 py-0.5 rounded ${
-                    log.type === 'win' ? 'bg-yellow-900/50 text-yellow-200' :
-                    log.type === 'action' ? 'bg-blue-900/30 text-blue-100' : 'text-gray-400'
-                }`}>
+                <div key={log.id} className={`text-[10px] px-2 py-0.5 rounded ${log.type === 'win' ? 'bg-yellow-900/50 text-yellow-200' : log.type === 'action' ? 'bg-blue-900/30 text-blue-100' : 'text-gray-400'}`}>
                     {log.text}
                 </div>
             ))}
          </div>
       </div>
 
-      {/* Dealer */}
       <Dealer message={gamePhase === GamePhase.Dealing ? "Dealing..." : undefined} />
 
-      {/* Table Area */}
       <div className="relative flex-grow flex items-center justify-center perspective-[1200px]">
-        
-        {/* Table Felt */}
+        {/* Table */}
         <div className="relative w-[95vw] aspect-[1.6/1] md:w-[900px] md:h-[550px] bg-[#1a4c28] rounded-[200px] shadow-[0_20px_50px_rgba(0,0,0,0.9)] border-[16px] border-[#3d2b1f] flex items-center justify-center ring-1 ring-white/10">
-           
-           {/* Inner Felt Texture */}
            <div className="absolute inset-0 rounded-[180px] bg-[radial-gradient(circle,_rgba(255,255,255,0.05)_0%,_rgba(0,0,0,0.3)_100%)]"></div>
            <div className="absolute inset-8 border-2 border-yellow-400/10 rounded-[160px]"></div>
            
-           {/* Center Pot */}
+           {/* Pot */}
            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-0">
               <div className="text-yellow-500/20 font-black text-6xl tracking-widest select-none pointer-events-none">ZJH</div>
               {pot > 0 && (
-                  <div className="mt-4 bg-black/40 px-6 py-2 rounded-full border border-yellow-500/30 flex items-center gap-2 shadow-[0_0_20px_rgba(234,179,8,0.2)] animate-bounce-slow">
+                  <div className="mt-4 bg-black/40 px-6 py-2 rounded-full border border-yellow-500/30 flex items-center gap-2 shadow-[0_0_20px_rgba(234,179,8,0.2)] animate-bounce-slow transition-all">
                       <Coins className="text-yellow-400" size={24} />
                       <span className="text-2xl font-mono text-yellow-100 font-bold">{pot}</span>
                   </div>
@@ -749,14 +690,11 @@ const App: React.FC = () => {
 
            {/* Players */}
            {players.map((p) => {
-               // Calculate visual position based on My ID
-               const offset = myPlayerId;
-               const relativePos = (p.id - offset + 4) % 4;
+               const relativePos = (p.id - myPlayerId + 4) % 4;
                let posName: 'bottom' | 'right' | 'top' | 'left' = 'bottom';
                if (relativePos === 1) posName = 'right';
                if (relativePos === 2) posName = 'top';
                if (relativePos === 3) posName = 'left';
-
                return (
                    <PlayerSeat 
                     key={p.id} 
@@ -766,35 +704,83 @@ const App: React.FC = () => {
                     position={posName}
                     isWinner={p.status === PlayerStatus.Won}
                     showCards={gamePhase === GamePhase.Showdown}
+                    isMe={p.id === myPlayerId}
                    />
                )
            })}
 
-           {/* Animations Layer */}
-           {/* Flying Card */}
+           {/* --- Animations Layer --- */}
+           
+           {/* Flying Card Animation */}
            {dealingCard && (
                <div 
                  className="absolute top-0 left-1/2 w-10 h-14 bg-blue-600 border border-white rounded shadow-xl z-50 transition-all duration-200 ease-out"
                  style={{
-                     // Rough physics for flying card
-                     transform: `translate(${
-                         dealingCard.targetId === myPlayerId ? '0px, 200px' : 
-                         (dealingCard.targetId - myPlayerId + 4) % 4 === 1 ? '350px, 0px' :
-                         (dealingCard.targetId - myPlayerId + 4) % 4 === 2 ? '0px, -200px' : '-350px, 0px'
-                     })`
+                     transform: `translate(${getPositionOffsets(dealingCard.targetId)[0]}px, ${getPositionOffsets(dealingCard.targetId)[1]}px)`
                  }}
                ></div>
            )}
 
-           {/* Flying Chips */}
-           {flyingChip && (
-               <div 
-                 className="absolute w-6 h-6 bg-yellow-500 rounded-full border-2 border-dashed border-yellow-200 shadow-lg z-50 animate-ping"
-                 style={{
-                     left: '50%', top: '50%',
-                 }}
-               ></div>
-           )}
+           {/* Flying Chips (Betting) */}
+           {flyingChips.map((chip) => {
+               const [x, y] = getPositionOffsets(chip.fromId);
+               return (
+                <div 
+                    key={chip.id}
+                    className="absolute w-6 h-6 bg-yellow-500 rounded-full border-2 border-dashed border-yellow-200 shadow-lg z-50 flex items-center justify-center transition-transform duration-500 ease-out"
+                    style={{
+                        // Start at player pos, translate to center (0,0)
+                        // We use a keyframe-like trick: render at start, then immediately effect to end?
+                        // React is fast. We rely on the fact that 'flyingChips' state adds the element.
+                        // For simple CSS transition from A to B, we need the element to mount with class A, then switch to B.
+                        // Here we will use an animation class defined in global CSS or simple inline animation
+                        animation: `flyToPot 0.5s forwards`,
+                        // Pass custom properties for the animation start point
+                        // @ts-ignore
+                        '--startX': `${x}px`,
+                        // @ts-ignore
+                        '--startY': `${y}px`,
+                    }}
+                >
+                    <style>{`
+                        @keyframes flyToPot {
+                            0% { transform: translate(var(--startX), var(--startY)) scale(1); opacity: 1; }
+                            100% { transform: translate(0, 0) scale(0.5); opacity: 0; }
+                        }
+                    `}</style>
+                </div>
+               );
+           })}
+
+            {/* Winning Chips Animation */}
+            {winningChips && (
+                <div className="absolute inset-0 pointer-events-none z-50">
+                    {Array.from({ length: 8 }).map((_, i) => {
+                        const [destX, destY] = getPositionOffsets(winningChips.winnerId);
+                        return (
+                            <div
+                                key={i}
+                                className="absolute top-1/2 left-1/2 w-8 h-8 bg-yellow-400 rounded-full border-2 border-yellow-200 shadow-[0_0_15px_yellow] flex items-center justify-center"
+                                style={{
+                                    animation: `flyToWinner 0.8s forwards ${i * 0.1}s`,
+                                    // @ts-ignore
+                                    '--destX': `${destX}px`,
+                                    // @ts-ignore
+                                    '--destY': `${destY}px`,
+                                }}
+                            >
+                                <style>{`
+                                    @keyframes flyToWinner {
+                                        0% { transform: translate(0, 0) scale(0.5); opacity: 1; }
+                                        80% { opacity: 1; }
+                                        100% { transform: translate(var(--destX), var(--destY)) scale(1); opacity: 0; }
+                                    }
+                                `}</style>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
 
            {/* Compare Overlay */}
            {compareMode && (
@@ -819,7 +805,6 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Controls */}
       <GameControls
         gamePhase={gamePhase}
         isMyTurn={isMyTurn}
