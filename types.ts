@@ -69,6 +69,13 @@ export interface LogEntry {
   type: 'info' | 'action' | 'win' | 'gemini';
 }
 
+export interface AnalysisResult {
+  winRate: number; // 0 to 1
+  handStrength: number; // 0 to 1 (Percentile)
+  advice: 'Fold' | 'Call' | 'Raise' | 'Caution';
+  handName: string;
+}
+
 // Multiplayer Types
 export interface GameState {
   players: Player[];

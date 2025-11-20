@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Player, PlayerStatus, GamePhase, LogEntry, Card, GameState, P2PMessage, Difficulty } from './types';
-import { createDeck, shuffleDeck, evaluateHand, compareHands } from './utils/pokerLogic';
+import { Player, PlayerStatus, GamePhase, LogEntry, Card, GameState, P2PMessage, Difficulty, AnalysisResult } from './types';
+import { createDeck, shuffleDeck, evaluateHand, compareHands, calculateWinProbability, calculateHandPercentile } from './utils/pokerLogic';
 import PlayerSeat from './components/PlayerSeat';
 import GameControls from './components/GameControls';
 import Dealer from './components/Dealer';
+import GameAnalyzer from './components/GameAnalyzer';
 import { generateCommentary } from './services/geminiService';
 import confetti from 'canvas-confetti';
 import { MessageSquareQuote, Copy, Coins, Settings } from 'lucide-react';
@@ -32,6 +33,10 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [geminiComment, setGeminiComment] = useState<string>("Welcome to the high stakes table.");
   
+  // Analysis State
+  const [analysisData, setAnalysisData] = useState<AnalysisResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
   // UI Interaction State
   const [compareMode, setCompareMode] = useState(false);
   const [dealingCard, setDealingCard] = useState<{targetId: number, cardIdx: number} | null>(null);
@@ -233,6 +238,61 @@ const App: React.FC = () => {
     }
   };
 
+  // --- Analyzer Logic ---
+  const runAnalysis = useCallback(() => {
+    try {
+        const me = players.find(p => p.id === myPlayerId);
+        if (!me || !me.hasSeenCards || me.status !== PlayerStatus.Playing || !me.hand || me.hand.length !== 3) {
+            setAnalysisData(null);
+            return;
+        }
+
+        setIsAnalyzing(true);
+        
+        // Run in next tick to allow UI to show loading state if we wanted, 
+        // though for small simulations it's fast enough to be synchronous.
+        setTimeout(() => {
+            try {
+                const activeOpponents = players.filter(p => p.id !== myPlayerId && p.status === PlayerStatus.Playing).length;
+                const winRate = calculateWinProbability(me.hand, activeOpponents);
+                const handStrength = calculateHandPercentile(me.hand);
+                const handEval = evaluateHand(me.hand);
+
+                let advice: AnalysisResult['advice'] = 'Fold';
+                if (winRate > 0.7) advice = 'Raise';
+                else if (winRate > 0.4) advice = 'Call';
+                else if (winRate > 0.2 && activeOpponents <= 1) advice = 'Caution';
+                else advice = 'Fold';
+
+                setAnalysisData({
+                    winRate,
+                    handStrength,
+                    advice,
+                    handName: handEval.name
+                });
+            } catch (e) {
+                console.warn("Analysis failed", e);
+            } finally {
+                setIsAnalyzing(false);
+            }
+        }, 100);
+    } catch (e) {
+        console.warn("Analysis setup failed", e);
+        setIsAnalyzing(false);
+    }
+  }, [players, myPlayerId]);
+
+  // Trigger analysis when player sees cards or opponent count changes
+  useEffect(() => {
+      const me = players.find(p => p.id === myPlayerId);
+      if (me && me.hasSeenCards && gamePhase === GamePhase.Betting) {
+          runAnalysis();
+      } else {
+          setAnalysisData(null);
+      }
+  }, [players, myPlayerId, gamePhase, runAnalysis]);
+
+
   const startNewRound = async () => {
     if (!isHost) return; 
 
@@ -256,6 +316,7 @@ const App: React.FC = () => {
         setPlayers(activePlayers);
         setPot(0);
         setGamePhase(GamePhase.Dealing);
+        setAnalysisData(null); // Clear analysis
         
         const newDeck = shuffleDeck(createDeck());
         if (!newDeck || newDeck.length === 0) {
@@ -451,6 +512,7 @@ const App: React.FC = () => {
   const handleWin = (winner: Player, currentPlayers: Player[], finalPot: number) => {
     try {
         setGamePhase(GamePhase.Showdown);
+        setAnalysisData(null); // Stop analysis
         const finalPlayers = currentPlayers.map(p => {
             if (p.id === winner.id) {
                 return { ...p, chips: p.chips + finalPot, status: PlayerStatus.Won };
@@ -637,6 +699,13 @@ const App: React.FC = () => {
              </div>
          )}
       </div>
+
+      {/* AI Analyzer (Left Side) */}
+      <GameAnalyzer 
+          analysis={analysisData} 
+          isLoading={isAnalyzing} 
+          visible={myPlayer.status === PlayerStatus.Playing}
+      />
 
       {/* Commentary & Logs */}
       <div className="absolute top-4 right-4 z-40 flex flex-col items-end max-w-[250px] md:max-w-sm pointer-events-none">
