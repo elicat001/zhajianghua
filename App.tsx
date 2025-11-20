@@ -225,9 +225,6 @@ const App: React.FC = () => {
 
   const safeConfetti = () => {
     try {
-        if (typeof confetti === 'undefined' || !confetti) return;
-        
-        // Explicitly handle potentially undefined module structure or CDN weirdness
         // @ts-ignore
         const confettiFn = confetti.default || confetti;
         if (typeof confettiFn === 'function') {
@@ -249,8 +246,7 @@ const App: React.FC = () => {
 
         setIsAnalyzing(true);
         
-        // Run in next tick to allow UI to show loading state if we wanted, 
-        // though for small simulations it's fast enough to be synchronous.
+        // Run in next tick to allow UI to show loading state if we wanted
         setTimeout(() => {
             try {
                 const activeOpponents = players.filter(p => p.id !== myPlayerId && p.status === PlayerStatus.Playing).length;
