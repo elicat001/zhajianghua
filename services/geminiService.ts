@@ -8,27 +8,9 @@ export const generateCommentary = async (
   lastAction: string,
   winner?: Player
 ): Promise<string> => {
-  let apiKey: string | undefined;
-  
   try {
-    // Extremely defensive check for process.env
-    if (typeof process !== 'undefined') {
-       // @ts-ignore
-       if (process && process.env && process.env.API_KEY) {
-         // @ts-ignore
-         apiKey = process.env.API_KEY;
-       }
-    }
-  } catch (e) {
-    // Ignore errors if process is not defined or restricted
-  }
-
-  if (!apiKey) {
-    return "";
-  }
-
-  try {
-    const ai = new GoogleGenAI({ apiKey: apiKey });
+    // Initialize with API key from process.env directly as per guidelines
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const model = "gemini-2.5-flash";
 
     // Summarize game state for the AI
@@ -64,7 +46,8 @@ export const generateCommentary = async (
       contents: prompt,
       config: {
         temperature: 0.9,
-        maxOutputTokens: 60,
+        // Disable thinking for lower latency in commentary tasks
+        thinkingConfig: { thinkingBudget: 0 }
       }
     });
 
