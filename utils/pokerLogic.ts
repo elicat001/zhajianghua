@@ -36,69 +36,79 @@ export const shuffleDeck = (deck: Card[]): Card[] => {
 };
 
 export const evaluateHand = (hand: Card[]): HandResult => {
-  // Safety check for empty, null, or incomplete hands
-  if (!hand || !Array.isArray(hand)) {
-    return { type: HandRank.HighCard, score: 0, name: 'Dealing...' };
-  }
+  try {
+      // Safety check for empty, null, or incomplete hands
+      if (!hand || !Array.isArray(hand)) {
+        return { type: HandRank.HighCard, score: 0, name: 'Dealing...' };
+      }
 
-  // Robust filter for valid card objects
-  const validCards = hand.filter(c => 
-      c && 
-      typeof c === 'object' && 
-      c.suit && 
-      typeof c.rank === 'number'
-  );
+      // Robust filter for valid card objects
+      const validCards = hand.filter(c => 
+          c && 
+          typeof c === 'object' && 
+          c.suit && 
+          typeof c.rank === 'number'
+      );
 
-  if (validCards.length < 3) {
-    return { type: HandRank.HighCard, score: 0, name: 'Dealing...' };
-  }
+      if (validCards.length < 3) {
+        return { type: HandRank.HighCard, score: 0, name: 'Dealing...' };
+      }
 
-  // Sort by rank descending
-  const sorted = [...validCards].sort((a, b) => (b.rank || 0) - (a.rank || 0));
-  const ranks = sorted.map((c) => c.rank);
-  const suits = sorted.map((c) => c.suit);
+      // Sort by rank descending
+      const sorted = [...validCards].sort((a, b) => (b.rank || 0) - (a.rank || 0));
+      const ranks = sorted.map((c) => c.rank);
+      const suits = sorted.map((c) => c.suit);
 
-  const isFlush = suits.every((s) => s === suits[0]);
-  
-  // Check Straight
-  let isStraight = false;
-  if (ranks[0] === ranks[1] + 1 && ranks[1] === ranks[2] + 1) {
-    isStraight = true;
-  }
-  // Special case: A-3-2 (14, 3, 2)
-  if (ranks[0] === 14 && ranks[1] === 3 && ranks[2] === 2) {
-      isStraight = true; 
-  }
+      // Safety check if mapping failed
+      if (ranks.some(r => r === undefined) || suits.some(s => s === undefined)) {
+          return { type: HandRank.HighCard, score: 0, name: 'Error' };
+      }
 
-  const isTrips = ranks[0] === ranks[1] && ranks[1] === ranks[2];
-  const isPair = ranks[0] === ranks[1] || ranks[1] === ranks[2]; 
+      const isFlush = suits.every((s) => s === suits[0]);
+      
+      // Check Straight
+      let isStraight = false;
+      if (ranks[0] === ranks[1] + 1 && ranks[1] === ranks[2] + 1) {
+        isStraight = true;
+      }
+      // Special case: A-3-2 (14, 3, 2)
+      if (ranks[0] === 14 && ranks[1] === 3 && ranks[2] === 2) {
+          isStraight = true; 
+      }
 
-  // Calculate tie-breaker value
-  const val = (ranks[0] || 0) * 256 + (ranks[1] || 0) * 16 + (ranks[2] || 0);
+      const isTrips = ranks[0] === ranks[1] && ranks[1] === ranks[2];
+      const isPair = ranks[0] === ranks[1] || ranks[1] === ranks[2]; 
 
-  if (isTrips) {
-    return { type: HandRank.Leopard, score: 600000 + val, name: 'Leopard (Bao Zi)' };
-  }
-  if (isFlush && isStraight) {
-    return { type: HandRank.StraightFlush, score: 500000 + val, name: 'Straight Flush' };
-  }
-  if (isFlush) {
-    return { type: HandRank.Flush, score: 400000 + val, name: 'Flush' };
-  }
-  if (isStraight) {
-    return { type: HandRank.Straight, score: 300000 + val, name: 'Straight' };
-  }
-  if (isPair) {
-    let pairRank = 0;
-    let kicker = 0;
-    if (ranks[0] === ranks[1]) { pairRank = ranks[0]; kicker = ranks[2]; }
-    else { pairRank = ranks[1]; kicker = ranks[0]; }
-    
-    const pairVal = pairRank * 4096 + kicker;
-    return { type: HandRank.Pair, score: 200000 + pairVal, name: 'Pair' };
-  }
+      // Calculate tie-breaker value
+      const val = (ranks[0] || 0) * 256 + (ranks[1] || 0) * 16 + (ranks[2] || 0);
 
-  return { type: HandRank.HighCard, score: 100000 + val, name: 'High Card' };
+      if (isTrips) {
+        return { type: HandRank.Leopard, score: 600000 + val, name: 'Leopard (Bao Zi)' };
+      }
+      if (isFlush && isStraight) {
+        return { type: HandRank.StraightFlush, score: 500000 + val, name: 'Straight Flush' };
+      }
+      if (isFlush) {
+        return { type: HandRank.Flush, score: 400000 + val, name: 'Flush' };
+      }
+      if (isStraight) {
+        return { type: HandRank.Straight, score: 300000 + val, name: 'Straight' };
+      }
+      if (isPair) {
+        let pairRank = 0;
+        let kicker = 0;
+        if (ranks[0] === ranks[1]) { pairRank = ranks[0]; kicker = ranks[2]; }
+        else { pairRank = ranks[1]; kicker = ranks[0]; }
+        
+        const pairVal = pairRank * 4096 + kicker;
+        return { type: HandRank.Pair, score: 200000 + pairVal, name: 'Pair' };
+      }
+
+      return { type: HandRank.HighCard, score: 100000 + val, name: 'High Card' };
+  } catch (e) {
+      console.error("Error evaluating hand", e);
+      return { type: HandRank.HighCard, score: 0, name: 'Error' };
+  }
 };
 
 export const compareHands = (hand1: Card[], hand2: Card[]): boolean => {
@@ -108,6 +118,6 @@ export const compareHands = (hand1: Card[], hand2: Card[]): boolean => {
     return r1.score > r2.score;
   } catch (e) {
     console.error("Error comparing hands:", e);
-    return false;
+    return false; // Default to losing if error occurs
   }
 };

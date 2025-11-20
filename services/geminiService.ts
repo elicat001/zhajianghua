@@ -11,14 +11,16 @@ export const generateCommentary = async (
   let apiKey: string | undefined;
   
   try {
-    // Safely attempt to access process.env for API_KEY
-    // @ts-ignore
-    if (typeof process !== 'undefined' && process.env) {
-      // @ts-ignore
-      apiKey = process.env.API_KEY;
+    // Extremely defensive check for process.env
+    if (typeof process !== 'undefined') {
+       // @ts-ignore
+       if (process && process.env && process.env.API_KEY) {
+         // @ts-ignore
+         apiKey = process.env.API_KEY;
+       }
     }
   } catch (e) {
-    // Ignore errors if process is not defined
+    // Ignore errors if process is not defined or restricted
   }
 
   if (!apiKey) {
@@ -68,7 +70,7 @@ export const generateCommentary = async (
 
     return response.text || "";
   } catch (error) {
-    console.warn("Gemini API Error (Non-fatal):", error);
+    // console.warn("Gemini API Error (Non-fatal):", error);
     return "";
   }
 };

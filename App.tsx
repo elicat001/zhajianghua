@@ -125,7 +125,9 @@ const App: React.FC = () => {
     }
 
     return () => {
-      if (ch) ch.close();
+      try {
+        if (ch) ch.close();
+      } catch(e) {}
       channelRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,7 +314,9 @@ const App: React.FC = () => {
 
   const handlePlayerAction = (pId: number, action: 'Fold' | 'Call' | 'Raise' | 'Compare' | 'Look', targetId?: number) => {
     if (!isHost) {
-        channelRef.current?.postMessage({ type: 'ACTION', playerId: pId, action, payload: targetId });
+        try {
+            channelRef.current?.postMessage({ type: 'ACTION', playerId: pId, action, payload: targetId });
+        } catch (e) { console.warn("Failed to send action", e); }
         return;
     }
 
