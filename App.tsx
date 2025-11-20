@@ -609,10 +609,17 @@ const App: React.FC = () => {
   const getPositionOffsets = (pid: number) => {
       const relativePos = (pid - myPlayerId + 4) % 4;
       // Returns [x, y] relative to center
-      if (relativePos === 0) return [0, 220]; // Bottom (Me)
-      if (relativePos === 1) return [380, 0]; // Right
-      if (relativePos === 2) return [0, -220]; // Top
-      if (relativePos === 3) return [-380, 0]; // Left
+      // Scaled down for mobile if needed, but since container scales, relative logic often holds if using percentage or viewport units.
+      // However, these pixels are used for FLIGHT animation coordinates.
+      // On mobile (width < 768), the table is smaller, so we need smaller offsets.
+      const isMobile = window.innerWidth < 768;
+      const yOffset = isMobile ? 140 : 220;
+      const xOffset = isMobile ? 160 : 380;
+
+      if (relativePos === 0) return [0, yOffset]; // Bottom (Me)
+      if (relativePos === 1) return [xOffset, 0]; // Right
+      if (relativePos === 2) return [0, -yOffset]; // Top
+      if (relativePos === 3) return [-xOffset, 0]; // Left
       return [0,0];
   };
 
@@ -624,30 +631,33 @@ const App: React.FC = () => {
   const activeOpponents = players.filter(p => p.id !== myPlayerId && p.status === PlayerStatus.Playing);
 
   return (
-    <div className="w-full h-screen bg-slate-950 overflow-hidden relative flex flex-col font-sans select-none">
+    <div className="w-full h-[100dvh] bg-slate-950 overflow-hidden relative flex flex-col font-sans select-none">
       
       {/* Background */}
       <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
       <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-green-950 to-black opacity-90"></div>
       
       {/* Top Bar */}
-      <div className="absolute top-4 left-4 z-50 flex gap-2 items-center">
-         <div className="bg-black/40 backdrop-blur px-4 py-2 rounded-full text-xs text-gray-300 border border-white/10 flex items-center gap-2">
-            <span>Room: <span className="text-yellow-400 font-mono">{roomId}</span></span>
+      <div className="absolute top-2 left-2 md:top-4 md:left-4 z-50 flex flex-col md:flex-row gap-2 md:items-center">
+         <div className="flex gap-2">
+            <div className="bg-black/40 backdrop-blur px-3 py-1 rounded-full text-[10px] md:text-xs text-gray-300 border border-white/10 flex items-center gap-1">
+                <span>Room: <span className="text-yellow-400 font-mono">{roomId}</span></span>
+            </div>
+            <button 
+            onClick={() => { navigator.clipboard.writeText(window.location.href); addLog("Link copied!"); }}
+            className="bg-blue-600 hover:bg-blue-500 text-white p-1 md:p-2 rounded-full shadow-lg transition-transform active:scale-90"
+            >
+                <Copy size={12} className="md:w-3.5 md:h-3.5" />
+            </button>
          </div>
-         <button 
-           onClick={() => { navigator.clipboard.writeText(window.location.href); addLog("Link copied!"); }}
-           className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-full shadow-lg transition-transform active:scale-90"
-         >
-            <Copy size={14} />
-         </button>
+
          {isHost && (
-             <div className="ml-2 flex items-center bg-black/40 backdrop-blur rounded-full px-2 border border-white/10">
-                <Settings size={14} className="text-gray-400 mr-2" />
+             <div className="flex items-center bg-black/40 backdrop-blur rounded-full px-2 border border-white/10 w-fit">
+                <Settings size={12} className="text-gray-400 mr-2" />
                 <select 
                     value={difficulty}
                     onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-                    className="bg-transparent text-xs text-yellow-400 font-bold py-2 focus:outline-none cursor-pointer"
+                    className="bg-transparent text-[10px] md:text-xs text-yellow-400 font-bold py-1 focus:outline-none cursor-pointer"
                 >
                     <option value={Difficulty.Easy}>Easy Bot</option>
                     <option value={Difficulty.Medium}>Medium Bot</option>
@@ -659,10 +669,10 @@ const App: React.FC = () => {
 
       <GameAnalyzer analysis={analysisData} isLoading={isAnalyzing} visible={myPlayer.status === PlayerStatus.Playing} />
 
-      <div className="absolute top-4 right-4 z-40 flex flex-col items-end max-w-[200px] pointer-events-none">
-         <div className="w-full bg-black/30 rounded-xl p-2 h-32 overflow-hidden flex flex-col-reverse gap-1 pointer-events-auto border border-white/5">
+      <div className="absolute top-2 right-2 md:top-4 md:right-4 z-40 flex flex-col items-end max-w-[120px] md:max-w-[200px] pointer-events-none">
+         <div className="w-full bg-black/30 rounded-xl p-1.5 md:p-2 h-24 md:h-32 overflow-hidden flex flex-col-reverse gap-1 pointer-events-auto border border-white/5">
             {logs.slice(-5).reverse().map(log => (
-                <div key={log.id} className={`text-[10px] px-2 py-0.5 rounded ${log.type === 'win' ? 'bg-yellow-900/50 text-yellow-200' : log.type === 'action' ? 'bg-blue-900/30 text-blue-100' : 'text-gray-400'}`}>
+                <div key={log.id} className={`text-[9px] md:text-[10px] px-1 py-0.5 rounded ${log.type === 'win' ? 'bg-yellow-900/50 text-yellow-200' : log.type === 'action' ? 'bg-blue-900/30 text-blue-100' : 'text-gray-400'}`}>
                     {log.text}
                 </div>
             ))}
@@ -672,18 +682,18 @@ const App: React.FC = () => {
       <Dealer message={gamePhase === GamePhase.Dealing ? "Dealing..." : undefined} />
 
       <div className="relative flex-grow flex items-center justify-center perspective-[1200px]">
-        {/* Table */}
-        <div className="relative w-[95vw] aspect-[1.6/1] md:w-[900px] md:h-[550px] bg-[#1a4c28] rounded-[200px] shadow-[0_20px_50px_rgba(0,0,0,0.9)] border-[16px] border-[#3d2b1f] flex items-center justify-center ring-1 ring-white/10">
-           <div className="absolute inset-0 rounded-[180px] bg-[radial-gradient(circle,_rgba(255,255,255,0.05)_0%,_rgba(0,0,0,0.3)_100%)]"></div>
-           <div className="absolute inset-8 border-2 border-yellow-400/10 rounded-[160px]"></div>
+        {/* Table - Responsive Sizing */}
+        <div className="relative w-[95vw] aspect-[1.2/1] md:aspect-[1.6/1] md:w-[900px] md:h-[550px] bg-[#1a4c28] rounded-[100px] md:rounded-[200px] shadow-[0_10px_30px_rgba(0,0,0,0.9)] border-[8px] md:border-[16px] border-[#3d2b1f] flex items-center justify-center ring-1 ring-white/10 transition-all duration-300">
+           <div className="absolute inset-0 rounded-[90px] md:rounded-[180px] bg-[radial-gradient(circle,_rgba(255,255,255,0.05)_0%,_rgba(0,0,0,0.3)_100%)]"></div>
+           <div className="absolute inset-4 md:inset-8 border-2 border-yellow-400/10 rounded-[80px] md:rounded-[160px]"></div>
            
            {/* Pot */}
            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-0">
-              <div className="text-yellow-500/20 font-black text-6xl tracking-widest select-none pointer-events-none">ZJH</div>
+              <div className="text-yellow-500/20 font-black text-4xl md:text-6xl tracking-widest select-none pointer-events-none">ZJH</div>
               {pot > 0 && (
-                  <div className="mt-4 bg-black/40 px-6 py-2 rounded-full border border-yellow-500/30 flex items-center gap-2 shadow-[0_0_20px_rgba(234,179,8,0.2)] animate-bounce-slow transition-all">
-                      <Coins className="text-yellow-400" size={24} />
-                      <span className="text-2xl font-mono text-yellow-100 font-bold">{pot}</span>
+                  <div className="mt-2 md:mt-4 bg-black/40 px-4 py-1 md:px-6 md:py-2 rounded-full border border-yellow-500/30 flex items-center gap-2 shadow-[0_0_20px_rgba(234,179,8,0.2)] animate-bounce-slow transition-all">
+                      <Coins className="text-yellow-400 w-4 h-4 md:w-6 md:h-6" />
+                      <span className="text-lg md:text-2xl font-mono text-yellow-100 font-bold">{pot}</span>
                   </div>
               )}
            </div>
@@ -714,7 +724,7 @@ const App: React.FC = () => {
            {/* Flying Card Animation */}
            {dealingCard && (
                <div 
-                 className="absolute top-0 left-1/2 w-10 h-14 bg-blue-600 border border-white rounded shadow-xl z-50 transition-all duration-200 ease-out"
+                 className="absolute top-0 left-1/2 w-8 h-12 md:w-10 md:h-14 bg-blue-600 border border-white rounded shadow-xl z-50 transition-all duration-200 ease-out"
                  style={{
                      transform: `translate(${getPositionOffsets(dealingCard.targetId)[0]}px, ${getPositionOffsets(dealingCard.targetId)[1]}px)`
                  }}
@@ -727,15 +737,9 @@ const App: React.FC = () => {
                return (
                 <div 
                     key={chip.id}
-                    className="absolute w-6 h-6 bg-yellow-500 rounded-full border-2 border-dashed border-yellow-200 shadow-lg z-50 flex items-center justify-center transition-transform duration-500 ease-out"
+                    className="absolute w-4 h-4 md:w-6 md:h-6 bg-yellow-500 rounded-full border-2 border-dashed border-yellow-200 shadow-lg z-50 flex items-center justify-center transition-transform duration-500 ease-out"
                     style={{
-                        // Start at player pos, translate to center (0,0)
-                        // We use a keyframe-like trick: render at start, then immediately effect to end?
-                        // React is fast. We rely on the fact that 'flyingChips' state adds the element.
-                        // For simple CSS transition from A to B, we need the element to mount with class A, then switch to B.
-                        // Here we will use an animation class defined in global CSS or simple inline animation
                         animation: `flyToPot 0.5s forwards`,
-                        // Pass custom properties for the animation start point
                         // @ts-ignore
                         '--startX': `${x}px`,
                         // @ts-ignore
@@ -760,7 +764,7 @@ const App: React.FC = () => {
                         return (
                             <div
                                 key={i}
-                                className="absolute top-1/2 left-1/2 w-8 h-8 bg-yellow-400 rounded-full border-2 border-yellow-200 shadow-[0_0_15px_yellow] flex items-center justify-center"
+                                className="absolute top-1/2 left-1/2 w-6 h-6 md:w-8 md:h-8 bg-yellow-400 rounded-full border-2 border-yellow-200 shadow-[0_0_15px_yellow] flex items-center justify-center"
                                 style={{
                                     animation: `flyToWinner 0.8s forwards ${i * 0.1}s`,
                                     // @ts-ignore
@@ -784,21 +788,21 @@ const App: React.FC = () => {
 
            {/* Compare Overlay */}
            {compareMode && (
-             <div className="absolute inset-0 bg-black/70 z-50 rounded-[180px] flex flex-col items-center justify-center animate-in fade-in">
-                <h2 className="text-2xl font-bold text-white mb-8 animate-pulse">CHOOSE OPPONENT</h2>
-                <div className="flex gap-4">
+             <div className="absolute inset-0 bg-black/70 z-50 rounded-[100px] md:rounded-[180px] flex flex-col items-center justify-center animate-in fade-in p-4">
+                <h2 className="text-lg md:text-2xl font-bold text-white mb-4 md:mb-8 animate-pulse text-center">CHOOSE OPPONENT</h2>
+                <div className="flex gap-2 md:gap-4 flex-wrap justify-center">
                     {activeOpponents.map(p => (
                         <button 
                             key={p.id}
                             onClick={() => { setCompareMode(false); handlePlayerAction(myPlayerId, 'Compare', p.id); }}
-                            className="w-24 h-24 rounded-full bg-red-600 hover:bg-red-500 border-4 border-white shadow-[0_0_20px_red] flex flex-col items-center justify-center transform hover:scale-110 transition-all"
+                            className="w-16 h-16 md:w-24 md:h-24 rounded-full bg-red-600 hover:bg-red-500 border-2 md:border-4 border-white shadow-[0_0_20px_red] flex flex-col items-center justify-center transform hover:scale-110 transition-all"
                         >
-                            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(p.name)}`} className="w-12 h-12 rounded-full mb-1" alt={p.name} />
-                            <span className="text-xs font-bold text-white bg-black/50 px-2 rounded">{p.name}</span>
+                            <img src={`https://api.dicebear.com/9.x/adventurer/svg?seed=${encodeURIComponent(p.name)}`} className="w-8 h-8 md:w-12 md:h-12 rounded-full mb-1" alt={p.name} />
+                            <span className="text-[8px] md:text-xs font-bold text-white bg-black/50 px-2 rounded max-w-full truncate">{p.name}</span>
                         </button>
                     ))}
                 </div>
-                <button onClick={() => setCompareMode(false)} className="mt-8 text-gray-400 hover:text-white underline">Cancel</button>
+                <button onClick={() => setCompareMode(false)} className="mt-4 md:mt-8 text-gray-400 hover:text-white underline text-sm">Cancel</button>
              </div>
            )}
 
