@@ -10,7 +10,9 @@ interface CardProps {
 }
 
 const CardComponent: React.FC<CardProps> = ({ card, hidden, className = '', small }) => {
-  const isRed = card.suit === Suit.Hearts || card.suit === Suit.Diamonds;
+  const isJoker = card.suit === Suit.Joker;
+  const isRedJoker = isJoker && card.rank === 17;
+  const isRed = isRedJoker || card.suit === Suit.Hearts || card.suit === Suit.Diamonds;
 
   // Base dimensions
   const sizeClasses = small 
@@ -30,7 +32,7 @@ const CardComponent: React.FC<CardProps> = ({ card, hidden, className = '', smal
         }}
       >
         
-        {/* --- Card Back (Visible when hidden is true, 0deg) --- */}
+        {/* --- Card Back --- */}
         <div 
           className="absolute inset-0 w-full h-full bg-blue-900 border-2 border-white/20 rounded-lg shadow-lg flex items-center justify-center overflow-hidden"
           style={{ backfaceVisibility: 'hidden', transform: 'rotateY(0deg)' }}
@@ -42,27 +44,45 @@ const CardComponent: React.FC<CardProps> = ({ card, hidden, className = '', smal
           </div>
         </div>
 
-        {/* --- Card Front (Visible when hidden is false, 180deg) --- */}
+        {/* --- Card Front --- */}
         <div 
           className={`absolute inset-0 w-full h-full bg-white border border-gray-300 rounded-lg shadow-lg flex flex-col items-center justify-between p-1 select-none`}
           style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
         >
-          {/* Top Left Corner */}
-          <div className={`w-full text-left font-bold leading-none ${isRed ? 'text-red-600' : 'text-black'} ${small ? 'text-[10px]' : 'text-sm md:text-lg'}`}>
-            {card.label}
-            <div className="text-[0.6em]">{card.suit}</div>
-          </div>
-          
-          {/* Center Suit */}
-          <div className={`absolute inset-0 flex items-center justify-center ${small ? 'text-lg' : 'text-2xl md:text-4xl'} ${isRed ? 'text-red-600' : 'text-black'}`}>
-            {card.suit}
-          </div>
+          {isJoker ? (
+            // Joker Layout
+            <>
+                <div className={`writing-mode-vertical text-[10px] md:text-xs font-bold tracking-widest absolute left-1 top-1 h-full ${isRed ? 'text-red-600' : 'text-black'}`}>
+                    JOKER
+                </div>
+                <div className={`absolute inset-0 flex items-center justify-center ${small ? 'text-sm' : 'text-xl'} font-black ${isRed ? 'text-red-600' : 'text-black'}`}>
+                   {isRed ? '🤡' : '🃏'}
+                </div>
+                 <div className={`writing-mode-vertical text-[10px] md:text-xs font-bold tracking-widest absolute right-1 bottom-1 h-full rotate-180 ${isRed ? 'text-red-600' : 'text-black'}`}>
+                    JOKER
+                </div>
+            </>
+          ) : (
+            // Standard Card Layout
+            <>
+                {/* Top Left Corner */}
+                <div className={`w-full text-left font-bold leading-none ${isRed ? 'text-red-600' : 'text-black'} ${small ? 'text-[10px]' : 'text-sm md:text-lg'}`}>
+                    {card.label}
+                    <div className="text-[0.6em]">{card.suit}</div>
+                </div>
+                
+                {/* Center Suit */}
+                <div className={`absolute inset-0 flex items-center justify-center ${small ? 'text-lg' : 'text-2xl md:text-4xl'} ${isRed ? 'text-red-600' : 'text-black'}`}>
+                    {card.suit}
+                </div>
 
-          {/* Bottom Right Corner (Rotated) */}
-          <div className={`w-full text-right font-bold leading-none rotate-180 ${isRed ? 'text-red-600' : 'text-black'} ${small ? 'text-[10px]' : 'text-sm md:text-lg'}`}>
-            {card.label}
-            <div className="text-[0.6em]">{card.suit}</div>
-          </div>
+                {/* Bottom Right Corner (Rotated) */}
+                <div className={`w-full text-right font-bold leading-none rotate-180 ${isRed ? 'text-red-600' : 'text-black'} ${small ? 'text-[10px]' : 'text-sm md:text-lg'}`}>
+                    {card.label}
+                    <div className="text-[0.6em]">{card.suit}</div>
+                </div>
+            </>
+          )}
         </div>
 
       </div>

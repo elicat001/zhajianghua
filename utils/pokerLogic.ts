@@ -7,6 +7,8 @@ const RANK_LABELS: Record<number, string> = {
   12: 'Q',
   13: 'K',
   14: 'A',
+  16: 'JOKER',
+  17: 'JOKER'
 };
 
 export const createDeck = (): Card[] => {
@@ -25,6 +27,27 @@ export const createDeck = (): Card[] => {
   return deck;
 };
 
+// Dou Di Zhu Deck: 52 cards + 2 Jokers
+export const createDDZDeck = (): Card[] => {
+  const deck = createDeck();
+  
+  // Add Black Joker (Small)
+  deck.push({
+    suit: Suit.Joker,
+    rank: 16,
+    label: 'S', // Small
+  });
+
+  // Add Red Joker (Big)
+  deck.push({
+    suit: Suit.Joker,
+    rank: 17,
+    label: 'B', // Big
+  });
+
+  return deck;
+};
+
 export const shuffleDeck = (deck: Card[]): Card[] => {
   if (!deck || !Array.isArray(deck)) return [];
   const newDeck = [...deck];
@@ -33,6 +56,11 @@ export const shuffleDeck = (deck: Card[]): Card[] => {
     [newDeck[i], newDeck[j]] = [newDeck[j], newDeck[i]];
   }
   return newDeck;
+};
+
+// Sort for DDZ (Descending rank)
+export const sortDDZHand = (hand: Card[]): Card[] => {
+    return [...hand].sort((a, b) => b.rank - a.rank);
 };
 
 export const evaluateHand = (hand: Card[]): HandResult => {
@@ -46,7 +74,7 @@ export const evaluateHand = (hand: Card[]): HandResult => {
       const validCards = hand.filter(c => 
           c && 
           typeof c === 'object' && 
-          c.suit && 
+          (c.suit || c.suit === Suit.Joker) && 
           typeof c.rank === 'number'
       );
 
@@ -122,20 +150,10 @@ export const compareHands = (hand1: Card[], hand2: Card[]): boolean => {
   }
 };
 
-/**
- * Calculates Win Probability using Monte Carlo Simulation
- * @param heroHand The player's cards
- * @param opponentCount Number of active opponents
- * @param iterations Number of simulations (default 1000 for performance/accuracy balance)
- */
 export const calculateWinProbability = (heroHand: Card[], opponentCount: number, iterations = 800): number => {
   if (!heroHand || heroHand.length !== 3 || opponentCount <= 0) return 0;
-
   const heroResult = evaluateHand(heroHand);
   const heroScore = heroResult.score;
-
-  // Create a base deck excluding hero cards
-  // Note: For perfect info, we could also exclude known board cards, but in ZJH usually only own cards are known.
   const fullDeck = createDeck();
   const heroCardKeys = new Set(heroHand.map(c => `${c.rank}-${c.suit}`));
   const remainingDeck = fullDeck.filter(c => !heroCardKeys.has(`${c.rank}-${c.suit}`));
@@ -143,16 +161,12 @@ export const calculateWinProbability = (heroHand: Card[], opponentCount: number,
   let wins = 0;
 
   for (let i = 0; i < iterations; i++) {
-    // Fisher-Yates Shuffle for simulation speed
     const simDeck = [...remainingDeck];
     for (let k = simDeck.length - 1; k > 0; k--) {
         const j = Math.floor(Math.random() * (k + 1));
         [simDeck[k], simDeck[j]] = [simDeck[j], simDeck[k]];
     }
-
     let heroWinsThisRound = true;
-    
-    // Deal cards to opponents and compare
     for (let opp = 0; opp < opponentCount; opp++) {
         const oppHand = [simDeck[opp*3], simDeck[opp*3+1], simDeck[opp*3+2]];
         const oppScore = evaluateHand(oppHand).score;
@@ -161,20 +175,13 @@ export const calculateWinProbability = (heroHand: Card[], opponentCount: number,
             break; 
         }
     }
-
     if (heroWinsThisRound) {
         wins++;
     }
   }
-
   return wins / iterations;
 };
 
-/**
- * Calculates roughly how good this hand is compared to ALL possible 3-card hands.
- * This acts as a "Hand Strength" percentile (0-100).
- */
 export const calculateHandPercentile = (hand: Card[]): number => {
-    // We can simply simulate 1v1 win rate against a random hand to approximate percentile
     return calculateWinProbability(hand, 1, 500);
 };

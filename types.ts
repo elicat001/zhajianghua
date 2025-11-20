@@ -4,11 +4,12 @@ export enum Suit {
   Hearts = '♥',
   Clubs = '♣',
   Diamonds = '♦',
+  Joker = 'JOKER' // Added for Dou Di Zhu
 }
 
 export interface Card {
   suit: Suit;
-  rank: number; // 2-14 (Ace is 14)
+  rank: number; // 2-14 (Ace), 16 (Black Joker), 17 (Red Joker)
   label: string;
 }
 
@@ -36,17 +37,18 @@ export enum PlayerStatus {
 }
 
 export interface Player {
-  id: number; // 0 is usually 'Me' in local view, but in multiplayer we use fixed IDs
+  id: number; 
   name: string;
   isBot: boolean;
   chips: number;
-  hand: Card[]; // Hand might be empty or partial during dealing
+  hand: Card[]; 
   status: PlayerStatus;
   hasSeenCards: boolean;
-  currentBetAmount: number; // Amount put in this round
-  totalInvested: number; // Total put in this game
-  actionFeedback?: string; // "Check", "Raise", etc.
+  currentBetAmount: number; 
+  totalInvested: number; 
+  actionFeedback?: string; 
   avatarId?: number;
+  isLandlord?: boolean; // DDZ specific
 }
 
 export enum GamePhase {
@@ -55,6 +57,8 @@ export enum GamePhase {
   Dealing = 'Dealing',
   Betting = 'Betting',
   Showdown = 'Showdown',
+  Bidding = 'Bidding', // DDZ specific
+  Playing = 'Playing'  // DDZ specific
 }
 
 export enum Difficulty {
@@ -70,8 +74,8 @@ export interface LogEntry {
 }
 
 export interface AnalysisResult {
-  winRate: number; // 0 to 1
-  handStrength: number; // 0 to 1 (Percentile)
+  winRate: number; 
+  handStrength: number; 
   advice: 'Fold' | 'Call' | 'Raise' | 'Caution';
   handName: string;
 }
@@ -94,3 +98,9 @@ export type P2PMessage =
   | { type: 'JOIN'; player: Player }
   | { type: 'STATE_UPDATE'; state: GameState }
   | { type: 'ACTION'; playerId: number; action: string; payload?: any };
+
+export enum GameMode {
+  Menu = 'Menu',
+  ZhaJinHua = 'ZhaJinHua',
+  DouDiZhu = 'DouDiZhu'
+}
