@@ -1,3 +1,4 @@
+
 export enum Suit {
   Spades = '♠',
   Hearts = '♥',
@@ -54,6 +55,12 @@ export enum GamePhase {
   Dealing = 'Dealing',
   Betting = 'Betting',
   Showdown = 'Showdown',
+}
+
+export enum Difficulty {
+  Easy = 'Easy',
+  Medium = 'Medium',
+  Hard = 'Hard'
 }
 
 export interface LogEntry {

@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Player, PlayerStatus, GamePhase, LogEntry, Card, GameState, P2PMessage } from './types';
+import { Player, PlayerStatus, GamePhase, LogEntry, Card, GameState, P2PMessage, Difficulty } from './types';
 import { createDeck, shuffleDeck, evaluateHand, compareHands } from './utils/pokerLogic';
 import PlayerSeat from './components/PlayerSeat';
 import GameControls from './components/GameControls';
 import Dealer from './components/Dealer';
 import { generateCommentary } from './services/geminiService';
 import confetti from 'canvas-confetti';
-import { MessageSquareQuote, Copy, Coins } from 'lucide-react';
+import { MessageSquareQuote, Copy, Coins, Settings } from 'lucide-react';
 
 // Constants
 const ANTE = 10;
@@ -19,6 +19,7 @@ const App: React.FC = () => {
   const [roomId, setRoomId] = useState<string>("");
   const [myPlayerId, setMyPlayerId] = useState<number>(0); // 0 is host/me
   const [isHost, setIsHost] = useState(true);
+  const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.Medium);
   
   // Game State
   const [deck, setDeck] = useState<Card[]>([]);
@@ -498,30 +499,82 @@ const App: React.FC = () => {
                 const handStrength = evaluateHand(latestPlayer.hand);
                 const rng = Math.random();
                 
-                if (!latestPlayer.hasSeenCards && rng > 0.85) {
+                // --- Difficulty Logic ---
+                
+                // 1. Decide whether to look at cards
+                let lookThreshold = 0.85; // Probability of NOT looking (playing blind)
+                if (difficulty === Difficulty.Easy) lookThreshold = 0.5; // Looks frequently
+                if (difficulty === Difficulty.Hard) lookThreshold = 0.9; // Plays blind aggressively
+
+                if (!latestPlayer.hasSeenCards && rng > lookThreshold) {
                     handlePlayerAction(latestPlayer.id, 'Look');
                     return; 
                 }
 
-                if (handStrength.score > 202000) { 
-                    if (rng > 0.7) handlePlayerAction(latestPlayer.id, 'Raise');
-                    else handlePlayerAction(latestPlayer.id, 'Call');
-                } else if (handStrength.score > 100500) { 
-                    if (rng > 0.4) handlePlayerAction(latestPlayer.id, 'Call');
-                    else if (rng > 0.8) {
-                        const validTargets = stateRef.current.players.filter(p => p.id !== latestPlayer.id && p.status === PlayerStatus.Playing);
-                        if (validTargets.length > 0) {
-                            const target = validTargets[Math.floor(Math.random() * validTargets.length)];
-                            handlePlayerAction(latestPlayer.id, 'Compare', target.id);
+                // 2. Strategy based on difficulty
+                let action: 'Fold' | 'Call' | 'Raise' | 'Compare' = 'Fold';
+                let targetId: number | undefined = undefined;
+                
+                const score = handStrength.score;
+                const validTargets = stateRef.current.players.filter(p => p.id !== latestPlayer.id && p.status === PlayerStatus.Playing);
+                
+                // --- Easy Strategy: Passive, calls too much, folds rare, raises only on nuts ---
+                if (difficulty === Difficulty.Easy) {
+                     if (score > 200000) { // Pair+
+                         action = rng > 0.7 ? 'Raise' : 'Call';
+                     } else if (score > 100500) { // Decent high card
+                         action = rng > 0.4 ? 'Call' : 'Fold';
+                     } else {
+                         // Weak hand, but calls often (fishy behavior)
+                         action = rng > 0.6 ? 'Call' : 'Fold';
+                     }
+                } 
+                // --- Hard Strategy: Aggressive, bluffs, plays blind ---
+                else if (difficulty === Difficulty.Hard) {
+                    // If playing blind, be aggressive
+                    if (!latestPlayer.hasSeenCards) {
+                         if (rng > 0.6) action = 'Raise';
+                         else action = 'Call';
+                    } else {
+                        if (score > 200000) { // Pair+
+                            action = 'Raise'; // Always value bet
+                        } else if (score > 100800) { // Good high card
+                            // Mix raise (semi-bluff) and call
+                            action = rng > 0.5 ? 'Raise' : 'Call';
                         } else {
-                            handlePlayerAction(latestPlayer.id, 'Call');
+                            // Weak hand
+                            if (rng > 0.8) action = 'Raise'; // Pure bluff
+                            else if (rng > 0.6 && validTargets.length > 0) action = 'Compare'; // Aggressive check
+                            else action = 'Fold';
                         }
                     }
-                    else handlePlayerAction(latestPlayer.id, 'Fold');
-                } else {
-                    if (rng > 0.9) handlePlayerAction(latestPlayer.id, 'Raise'); 
-                    else handlePlayerAction(latestPlayer.id, 'Fold');
+                } 
+                // --- Medium Strategy (Balanced) ---
+                else {
+                    if (score > 202000) { 
+                        action = rng > 0.7 ? 'Raise' : 'Call';
+                    } else if (score > 100500) { 
+                        if (rng > 0.4) action = 'Call';
+                        else if (rng > 0.8 && validTargets.length > 0) action = 'Compare';
+                        else action = 'Fold';
+                    } else {
+                        if (rng > 0.9) action = 'Raise'; // Rare bluff
+                        else action = 'Fold';
+                    }
                 }
+
+                // Execute Action
+                if (action === 'Compare') {
+                    if (validTargets.length > 0) {
+                        targetId = validTargets[Math.floor(Math.random() * validTargets.length)].id;
+                        handlePlayerAction(latestPlayer.id, 'Compare', targetId);
+                    } else {
+                        handlePlayerAction(latestPlayer.id, 'Call'); // Fallback
+                    }
+                } else {
+                    handlePlayerAction(latestPlayer.id, action);
+                }
+
             } catch (e) {
                 console.error("AI logic error:", e);
             }
@@ -533,7 +586,7 @@ const App: React.FC = () => {
         if (turnTimeoutRef.current) window.clearTimeout(turnTimeoutRef.current); 
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turnIndex, gamePhase, players, isHost]);
+  }, [turnIndex, gamePhase, players, isHost, difficulty]);
 
 
   // --- Render ---
@@ -553,8 +606,8 @@ const App: React.FC = () => {
       <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
       <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-green-950 to-black opacity-90"></div>
       
-      {/* Invite & Room Info */}
-      <div className="absolute top-4 left-4 z-50 flex gap-2">
+      {/* Invite, Room Info & Settings */}
+      <div className="absolute top-4 left-4 z-50 flex gap-2 items-center">
          <div className="bg-black/40 backdrop-blur px-4 py-2 rounded-full text-xs text-gray-300 border border-white/10 flex items-center gap-2">
             <span>Room: <span className="text-yellow-400 font-mono">{roomId}</span></span>
          </div>
@@ -568,6 +621,21 @@ const App: React.FC = () => {
          >
             <Copy size={14} />
          </button>
+
+         {isHost && (
+             <div className="ml-2 flex items-center bg-black/40 backdrop-blur rounded-full px-2 border border-white/10">
+                <Settings size={14} className="text-gray-400 mr-2" />
+                <select 
+                    value={difficulty}
+                    onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                    className="bg-transparent text-xs text-yellow-400 font-bold py-2 focus:outline-none cursor-pointer"
+                >
+                    <option value={Difficulty.Easy}>Easy Bot</option>
+                    <option value={Difficulty.Medium}>Medium Bot</option>
+                    <option value={Difficulty.Hard}>Hard Bot</option>
+                </select>
+             </div>
+         )}
       </div>
 
       {/* Commentary & Logs */}
