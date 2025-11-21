@@ -207,24 +207,35 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
         setTimeout(() => {
             try {
                 const activeOpponents = players.filter(p => p.id !== myPlayerId && p.status === PlayerStatus.Playing).length;
-                const winRate = calculateWinProbability(me.hand, activeOpponents); // Basic without knownCards in this component for now to save complexity
-                const handStrength = calculateHandPercentile(me.hand);
+                // Pass knownCards to make simulation accurate
+                const winRate = calculateWinProbability(me.hand, activeOpponents, 800, knownCards); 
+                // Strength relative to remaining deck
+                const handStrength = calculateHandPercentile(me.hand, knownCards);
                 const handEval = evaluateHand(me.hand);
+                
                 let advice: AnalysisResult['advice'] = 'Fold';
                 if (winRate > 0.7) advice = 'Raise';
                 else if (winRate > 0.4) advice = 'Call';
                 else if (winRate > 0.2 && activeOpponents <= 1) advice = 'Caution';
                 else advice = 'Fold';
-                setAnalysisData({ winRate, handStrength, advice, handName: handEval.name });
+
+                setAnalysisData({ 
+                    winRate, 
+                    handStrength, 
+                    advice, 
+                    handName: handEval.name,
+                    knownCardsCount: knownCards.length 
+                });
             } catch (e) { console.warn("Analysis failed", e); } finally { setIsAnalyzing(false); }
         }, 100);
     } catch (e) { setIsAnalyzing(false); }
-  }, [players, myPlayerId]);
+  }, [players, myPlayerId, knownCards]);
 
   useEffect(() => {
       const me = players.find(p => p.id === myPlayerId);
+      // Trigger analysis if it's my turn OR if I just looked/cards were revealed
       if (me && me.hasSeenCards && gamePhase === GamePhase.Betting) { runAnalysis(); } else { setAnalysisData(null); }
-  }, [players, myPlayerId, gamePhase, runAnalysis]);
+  }, [players, myPlayerId, gamePhase, runAnalysis, knownCards]);
 
   const startNewRound = async () => {
     if (!isHost) return; 

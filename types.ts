@@ -78,6 +78,7 @@ export interface AnalysisResult {
   handStrength: number; 
   advice: 'Fold' | 'Call' | 'Raise' | 'Caution';
   handName: string;
+  knownCardsCount?: number;
 }
 
 // Multiplayer Types

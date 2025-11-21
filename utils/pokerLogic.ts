@@ -150,22 +150,39 @@ export const compareHands = (hand1: Card[], hand2: Card[]): boolean => {
   }
 };
 
-export const calculateWinProbability = (heroHand: Card[], opponentCount: number, iterations = 800): number => {
+export const calculateWinProbability = (
+  heroHand: Card[], 
+  opponentCount: number, 
+  iterations = 800, 
+  excludeCards: Card[] = []
+): number => {
   if (!heroHand || heroHand.length !== 3 || opponentCount <= 0) return 0;
   const heroResult = evaluateHand(heroHand);
   const heroScore = heroResult.score;
   const fullDeck = createDeck();
+  
   const heroCardKeys = new Set(heroHand.map(c => `${c.rank}-${c.suit}`));
-  const remainingDeck = fullDeck.filter(c => !heroCardKeys.has(`${c.rank}-${c.suit}`));
+  const excludeKeys = new Set(excludeCards.map(c => `${c.rank}-${c.suit}`));
+
+  // Remove hero's cards and any other known cards (e.g. revealed in PK)
+  const remainingDeck = fullDeck.filter(c => 
+    !heroCardKeys.has(`${c.rank}-${c.suit}`) && 
+    !excludeKeys.has(`${c.rank}-${c.suit}`)
+  );
 
   let wins = 0;
 
   for (let i = 0; i < iterations; i++) {
     const simDeck = [...remainingDeck];
+    // Fisher-Yates Shuffle partial deck
     for (let k = simDeck.length - 1; k > 0; k--) {
         const j = Math.floor(Math.random() * (k + 1));
         [simDeck[k], simDeck[j]] = [simDeck[j], simDeck[k]];
     }
+
+    // Check if deck has enough cards to deal to all opponents
+    if (simDeck.length < opponentCount * 3) break;
+
     let heroWinsThisRound = true;
     for (let opp = 0; opp < opponentCount; opp++) {
         const oppHand = [simDeck[opp*3], simDeck[opp*3+1], simDeck[opp*3+2]];
@@ -182,6 +199,6 @@ export const calculateWinProbability = (heroHand: Card[], opponentCount: number,
   return wins / iterations;
 };
 
-export const calculateHandPercentile = (hand: Card[]): number => {
-    return calculateWinProbability(hand, 1, 500);
+export const calculateHandPercentile = (hand: Card[], excludeCards: Card[] = []): number => {
+    return calculateWinProbability(hand, 1, 500, excludeCards);
 };

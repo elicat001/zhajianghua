@@ -68,7 +68,14 @@ const GameAnalyzer: React.FC<GameAnalyzerProps> = ({ analysis, isLoading, visibl
                   style={{ width: `${analysis.handStrength * 100}%` }}
                 ></div>
               </div>
-              <div className="text-[9px] text-gray-400 mt-1 text-right truncate">{analysis.handName}</div>
+              <div className="flex justify-between mt-1">
+                <div className="text-[9px] text-gray-400 truncate">{analysis.handName}</div>
+                {analysis.knownCardsCount !== undefined && analysis.knownCardsCount > 0 && (
+                    <div className="text-[9px] text-yellow-500/80">
+                        Excl {analysis.knownCardsCount} cards
+                    </div>
+                )}
+              </div>
             </div>
 
             {/* Win Rate */}
