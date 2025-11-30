@@ -6,9 +6,7 @@ const RANK_LABELS: Record<number, string> = {
   11: 'J',
   12: 'Q',
   13: 'K',
-  14: 'A',
-  16: 'JOKER',
-  17: 'JOKER'
+  14: 'A'
 };
 
 export const createDeck = (): Card[] => {
@@ -27,27 +25,6 @@ export const createDeck = (): Card[] => {
   return deck;
 };
 
-// Dou Di Zhu Deck: 52 cards + 2 Jokers
-export const createDDZDeck = (): Card[] => {
-  const deck = createDeck();
-  
-  // Add Black Joker (Small)
-  deck.push({
-    suit: Suit.Joker,
-    rank: 16,
-    label: 'S', // Small
-  });
-
-  // Add Red Joker (Big)
-  deck.push({
-    suit: Suit.Joker,
-    rank: 17,
-    label: 'B', // Big
-  });
-
-  return deck;
-};
-
 export const shuffleDeck = (deck: Card[]): Card[] => {
   if (!deck || !Array.isArray(deck)) return [];
   const newDeck = [...deck];
@@ -56,11 +33,6 @@ export const shuffleDeck = (deck: Card[]): Card[] => {
     [newDeck[i], newDeck[j]] = [newDeck[j], newDeck[i]];
   }
   return newDeck;
-};
-
-// Sort for DDZ (Descending rank)
-export const sortDDZHand = (hand: Card[]): Card[] => {
-    return [...hand].sort((a, b) => b.rank - a.rank);
 };
 
 export const evaluateHand = (hand: Card[]): HandResult => {
@@ -74,7 +46,7 @@ export const evaluateHand = (hand: Card[]): HandResult => {
       const validCards = hand.filter(c => 
           c && 
           typeof c === 'object' && 
-          (c.suit || c.suit === Suit.Joker) && 
+          (c.suit) && 
           typeof c.rank === 'number'
       );
 

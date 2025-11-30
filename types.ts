@@ -3,13 +3,12 @@ export enum Suit {
   Spades = '♠',
   Hearts = '♥',
   Clubs = '♣',
-  Diamonds = '♦',
-  Joker = 'JOKER' // Added for Dou Di Zhu
+  Diamonds = '♦'
 }
 
 export interface Card {
   suit: Suit;
-  rank: number; // 2-14 (Ace), 16 (Black Joker), 17 (Red Joker)
+  rank: number; // 2-14 (Ace)
   label: string;
 }
 
@@ -48,7 +47,6 @@ export interface Player {
   totalInvested: number; 
   actionFeedback?: string; 
   avatarId?: number;
-  isLandlord?: boolean; // DDZ specific
 }
 
 export enum GamePhase {
@@ -56,9 +54,7 @@ export enum GamePhase {
   Idle = 'Idle',
   Dealing = 'Dealing',
   Betting = 'Betting',
-  Showdown = 'Showdown',
-  Bidding = 'Bidding', // DDZ specific
-  Playing = 'Playing'  // DDZ specific
+  Showdown = 'Showdown'
 }
 
 export enum Difficulty {
@@ -96,12 +92,6 @@ export interface GameState {
 }
 
 export type P2PMessage = 
-  | { type: 'JOIN'; player: Player }
+  | { type: 'JOIN_REQUEST'; name: string }
   | { type: 'STATE_UPDATE'; state: GameState }
   | { type: 'ACTION'; playerId: number; action: string; payload?: any };
-
-export enum GameMode {
-  Menu = 'Menu',
-  ZhaJinHua = 'ZhaJinHua',
-  DouDiZhu = 'DouDiZhu'
-}

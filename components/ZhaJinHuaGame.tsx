@@ -6,22 +6,25 @@ import PlayerSeat from './PlayerSeat';
 import GameControls from './GameControls';
 import Dealer from './Dealer';
 import GameAnalyzer from './GameAnalyzer';
-import confetti from 'canvas-confetti';
-import { Copy, Coins, Settings, ArrowLeft } from 'lucide-react';
+// @ts-ignore
+import * as confetti from 'canvas-confetti';
+import { Copy, Coins, Settings, LogOut } from 'lucide-react';
 
 // Constants
 const ANTE = 10;
 const INITIAL_CHIPS = 1000;
 
 interface ZhaJinHuaGameProps {
+    playerName: string;
+    roomId: string;
+    isHost: boolean;
     onExit: () => void;
 }
 
-const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
+const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ playerName, roomId, isHost, onExit }) => {
   // --- State ---
-  const [roomId, setRoomId] = useState<string>("");
-  const [myPlayerId, setMyPlayerId] = useState<number>(0); // 0 is host/me
-  const [isHost, setIsHost] = useState(true);
+  // If host, I am 0. If guest, I am waiting for ID (-1).
+  const [myPlayerId, setMyPlayerId] = useState<number>(isHost ? 0 : -1); 
   const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.Medium);
   
   // Game State
@@ -51,6 +54,7 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
   const turnTimeoutRef = useRef<number | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
   
+  // Keep a ref to state for P2P sync and async operations
   const stateRef = useRef<GameState>({
     players: [],
     pot: 0,
@@ -63,49 +67,92 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
     roomId: ""
   });
 
+  // Update ref when state changes
   useEffect(() => {
-    try {
-      stateRef.current = {
-          players, pot, currentBetUnit, dealerIndex, turnIndex, gamePhase, logs, turnCount: 0, roomId
-      };
-      if (isHost) broadcastState({});
-    } catch (e) {
-      console.warn("Error in state sync effect:", e);
-    }
+    stateRef.current = {
+        players, pot, currentBetUnit, dealerIndex, turnIndex, gamePhase, logs, turnCount: 0, roomId
+    };
+    if (isHost) broadcastState({});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [players, pot, currentBetUnit, dealerIndex, turnIndex, gamePhase, logs, isHost]);
 
+  // --- Initialization ---
   useEffect(() => {
-    if (!roomId) return;
+    // Only Host initializes the game state with Bots
+    if (isHost) {
+        const initialPlayers: Player[] = [
+            { id: 0, name: playerName, isBot: false, chips: INITIAL_CHIPS, hand: [], status: PlayerStatus.Waiting, hasSeenCards: false, currentBetAmount: 0, totalInvested: 0, avatarId: 1 },
+            { id: 1, name: "Li Wei", isBot: true, chips: INITIAL_CHIPS, hand: [], status: PlayerStatus.Waiting, hasSeenCards: false, currentBetAmount: 0, totalInvested: 0, avatarId: 2 },
+            { id: 2, name: "Fat Brother", isBot: true, chips: INITIAL_CHIPS, hand: [], status: PlayerStatus.Waiting, hasSeenCards: false, currentBetAmount: 0, totalInvested: 0, avatarId: 3 },
+            { id: 3, name: "Auntie Zhang", isBot: true, chips: INITIAL_CHIPS, hand: [], status: PlayerStatus.Waiting, hasSeenCards: false, currentBetAmount: 0, totalInvested: 0, avatarId: 4 },
+        ];
+        setPlayers(initialPlayers);
+        setGamePhase(GamePhase.Idle);
+        setLogs([{ id: 'init', text: `Room Created: ${roomId}`, type: 'info' }]);
+    } else {
+        // Guest starts empty and waits for sync
+        setLogs([{ id: 'init', text: `Joining Room ${roomId}...`, type: 'info' }]);
+    }
+  }, [isHost, playerName, roomId]);
+
+  // --- BroadcastChannel & Networking ---
+  useEffect(() => {
     let ch: BroadcastChannel | null = null;
     try {
         if (typeof BroadcastChannel !== 'undefined') {
             ch = new BroadcastChannel(`zjh_room_${roomId}`);
             channelRef.current = ch;
+            
+            // If Guest, send Join Request immediately
+            if (!isHost) {
+                setTimeout(() => {
+                    ch?.postMessage({ type: 'JOIN_REQUEST', name: playerName });
+                }, 500);
+            }
+
             const handleMessage = (event: MessageEvent) => {
               try {
                 if (!event || !event.data) return;
                 const msg = event.data as P2PMessage;
                 const currentState = stateRef.current;
+
                 if (isHost) {
+                    // --- Host Logic ---
                     if (msg.type === 'ACTION') {
                         handlePlayerAction(msg.playerId, msg.action as any, msg.payload);
                     }
-                    if (msg.type === 'JOIN') {
+                    else if (msg.type === 'JOIN_REQUEST') {
+                        // Find a bot to replace
                         const currentP = [...currentState.players];
+                        // Look for a bot (id > 0)
                         const botIndex = currentP.findIndex(p => p.isBot && p.id !== 0);
+                        
                         if (botIndex !== -1) {
-                            const newPlayer = { ...msg.player, id: currentP[botIndex].id, chips: INITIAL_CHIPS };
+                            const newPlayerId = currentP[botIndex].id;
+                            const newPlayer: Player = { 
+                                ...currentP[botIndex], 
+                                name: msg.name, 
+                                isBot: false, 
+                                chips: INITIAL_CHIPS, // Reset chips for new player
+                                avatarId: Math.floor(Math.random() * 20) + 5
+                            };
                             currentP[botIndex] = newPlayer;
                             setPlayers(currentP);
-                            addLog(`${msg.player.name} joined the table!`, 'info');
-                            if (channelRef.current) {
-                              const fullState: GameState = { ...currentState, players: currentP };
-                              channelRef.current.postMessage({ type: 'STATE_UPDATE', state: fullState });
-                            }
+                            addLog(`${msg.name} joined!`, 'info');
+                            
+                            // Broadcast immediately so guest knows they are in
+                            setTimeout(() => {
+                                if (channelRef.current) {
+                                  const fullState: GameState = { ...currentState, players: currentP };
+                                  channelRef.current.postMessage({ type: 'STATE_UPDATE', state: fullState });
+                                }
+                            }, 100);
+                        } else {
+                            // Table full logic could go here
                         }
                     }
                 } else {
+                    // --- Guest Logic ---
                     if (msg.type === 'STATE_UPDATE') {
                         syncState(msg.state);
                     }
@@ -120,42 +167,21 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
       channelRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, isHost]);
+  }, [roomId, isHost, playerName]);
 
-  const initializeGame = useCallback((name: string, room: string, host: boolean) => {
-    const newPlayers: Player[] = [
-        { id: 0, name: name, isBot: false, chips: INITIAL_CHIPS, hand: [], status: PlayerStatus.Waiting, hasSeenCards: false, currentBetAmount: 0, totalInvested: 0 },
-        { id: 1, name: "Li Wei", isBot: true, chips: INITIAL_CHIPS, hand: [], status: PlayerStatus.Waiting, hasSeenCards: false, currentBetAmount: 0, totalInvested: 0 },
-        { id: 2, name: "Fat Brother", isBot: true, chips: INITIAL_CHIPS, hand: [], status: PlayerStatus.Waiting, hasSeenCards: false, currentBetAmount: 0, totalInvested: 0 },
-        { id: 3, name: "Auntie Zhang", isBot: true, chips: INITIAL_CHIPS, hand: [], status: PlayerStatus.Waiting, hasSeenCards: false, currentBetAmount: 0, totalInvested: 0 },
-    ];
-    setPlayers(newPlayers);
-    setRoomId(room);
-    setIsHost(host);
-    setGamePhase(GamePhase.Idle);
-    setLogs([{ id: 'init', text: `Joined Room ${room}`, type: 'info' }]);
-
-    if (!host) {
-        setMyPlayerId(1); 
-        setTimeout(() => {
-            try { channelRef.current?.postMessage({ type: 'JOIN', player: { ...newPlayers[0], id: 1 } }); } catch(e) {}
-        }, 1000);
-    }
-  }, []);
-
+  // Guest: Check if I've been assigned an ID in the new state
   useEffect(() => {
-    try {
-        const params = new URLSearchParams(window.location.search);
-        const roomParam = params.get('room');
-        if (roomParam) {
-            const randomName = `Guest${Math.floor(Math.random()*1000)}`;
-            initializeGame(randomName, roomParam, false);
-        } else {
-            const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-            initializeGame("Me", newRoomId, true);
+    if (!isHost && myPlayerId === -1 && players.length > 0) {
+        // Simple check: Look for my name. 
+        // In a real app, we'd use a unique session ID in the JOIN_REQUEST to prevent name collision issues.
+        const me = players.find(p => p.name === playerName && !p.isBot);
+        if (me) {
+            setMyPlayerId(me.id);
+            addLog(`Joined as ${me.name}`, 'info');
         }
-    } catch (e) {}
-  }, [initializeGame]);
+    }
+  }, [players, isHost, myPlayerId, playerName]);
+
 
   const syncState = (newState: GameState) => {
       if (!newState || !newState.players) return;
@@ -165,7 +191,14 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
         setDealerIndex(newState.dealerIndex);
         setTurnIndex(newState.turnIndex);
         setGamePhase(newState.gamePhase);
-        setLogs(newState.logs || []);
+        // Merge logs simply
+        if (newState.logs && newState.logs.length > 0) {
+            const lastLog = newState.logs[newState.logs.length-1];
+            setLogs(prev => {
+                if (prev.length > 0 && prev[prev.length-1].id === lastLog.id) return prev;
+                return newState.logs;
+            });
+        }
         setCurrentBetUnit(newState.currentBetUnit);
       } catch (e) {}
   };
@@ -184,10 +217,13 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
 
   const safeConfetti = () => {
     try {
+        // Robust confetti access
         // @ts-ignore
-        const confettiFn = confetti.default || confetti;
-        if (typeof confettiFn === 'function') confettiFn({ particleCount: 200, spread: 100, origin: { y: 0.6 } });
-    } catch (e) {}
+        const C = confetti.default || confetti || window.confetti;
+        if (typeof C === 'function') {
+            C({ particleCount: 200, spread: 100, origin: { y: 0.6 } });
+        }
+    } catch (e) { console.warn("Confetti error", e); }
   };
 
   const triggerChipAnimation = (fromId: number, amount: number) => {
@@ -207,9 +243,7 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
         setTimeout(() => {
             try {
                 const activeOpponents = players.filter(p => p.id !== myPlayerId && p.status === PlayerStatus.Playing).length;
-                // Pass knownCards to make simulation accurate
                 const winRate = calculateWinProbability(me.hand, activeOpponents, 800, knownCards); 
-                // Strength relative to remaining deck
                 const handStrength = calculateHandPercentile(me.hand, knownCards);
                 const handEval = evaluateHand(me.hand);
                 
@@ -233,7 +267,6 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
 
   useEffect(() => {
       const me = players.find(p => p.id === myPlayerId);
-      // Trigger analysis if it's my turn OR if I just looked/cards were revealed
       if (me && me.hasSeenCards && gamePhase === GamePhase.Betting) { runAnalysis(); } else { setAnalysisData(null); }
   }, [players, myPlayerId, gamePhase, runAnalysis, knownCards]);
 
@@ -378,7 +411,6 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
                 const target = newPlayers.find(p => p.id === targetId);
                 if (target) {
                     const iWin = compareHands(currentPlayer.hand, target.hand);
-                    // Reveal cards to game memory
                     setKnownCards(prev => [...prev, ...currentPlayer.hand, ...target.hand]);
                     if (iWin) {
                         target.status = PlayerStatus.Lost;
@@ -477,7 +509,9 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
   }, [turnIndex, gamePhase, players, isHost, difficulty]);
 
   const getPositionOffsets = (pid: number) => {
-      const relativePos = (pid - myPlayerId + 4) % 4;
+      // If I'm a guest and haven't sat down yet (id=-1), show default view
+      const myId = myPlayerId === -1 ? 0 : myPlayerId;
+      const relativePos = (pid - myId + 4) % 4;
       const isMobile = window.innerWidth < 768;
       const yOffset = isMobile ? 140 : 220;
       const xOffset = isMobile ? 160 : 380;
@@ -489,9 +523,18 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
   };
 
   const myPlayer = players.find(p => p.id === myPlayerId) || players[0];
-  if (!myPlayer) return <div>Loading...</div>;
+  // Wait for sync if Guest
+  if (!myPlayer && !isHost && players.length === 0) return (
+      <div className="w-full h-screen flex items-center justify-center bg-slate-950 text-white">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-8 h-8 border-4 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+            <div>Waiting for host to accept...</div>
+            <button onClick={onExit} className="text-sm text-red-400 underline">Cancel</button>
+          </div>
+      </div>
+  );
 
-  const isMyTurn = turnIndex === myPlayerId && gamePhase === GamePhase.Betting && myPlayer.status === PlayerStatus.Playing;
+  const isMyTurn = turnIndex === myPlayerId && gamePhase === GamePhase.Betting && myPlayer?.status === PlayerStatus.Playing;
   const myCost = currentBetUnit * (myPlayer?.hasSeenCards ? 2 : 1);
   const activeOpponents = players.filter(p => p.id !== myPlayerId && p.status === PlayerStatus.Playing);
 
@@ -501,13 +544,20 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
       <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-green-950 to-black opacity-90"></div>
       
       <div className="absolute top-2 left-2 md:top-4 md:left-4 z-50 flex flex-col md:flex-row gap-2 md:items-center">
-         <button onClick={onExit} className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-full shadow-lg"><ArrowLeft size={16}/></button>
          <div className="flex gap-2">
+            <button onClick={onExit} className="bg-red-900/50 hover:bg-red-800 text-white p-1 md:p-2 rounded-full border border-red-500/30 mr-2">
+                <LogOut size={12} className="md:w-3.5 md:h-3.5" />
+            </button>
             <div className="bg-black/40 backdrop-blur px-3 py-1 rounded-full text-[10px] md:text-xs text-gray-300 border border-white/10 flex items-center gap-1">
                 <span>Room: <span className="text-yellow-400 font-mono">{roomId}</span></span>
             </div>
             <button 
-            onClick={() => { navigator.clipboard.writeText(window.location.href); addLog("Link copied!"); }}
+            onClick={() => { 
+                const url = new URL(window.location.href);
+                url.searchParams.set('room', roomId);
+                navigator.clipboard.writeText(url.toString()); 
+                addLog("Link copied!"); 
+            }}
             className="bg-blue-600 hover:bg-blue-500 text-white p-1 md:p-2 rounded-full shadow-lg"
             >
                 <Copy size={12} className="md:w-3.5 md:h-3.5" />
@@ -529,7 +579,7 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
          )}
       </div>
 
-      <GameAnalyzer analysis={analysisData} isLoading={isAnalyzing} visible={myPlayer.status === PlayerStatus.Playing} />
+      <GameAnalyzer analysis={analysisData} isLoading={isAnalyzing} visible={myPlayer?.status === PlayerStatus.Playing} />
 
       <div className="absolute top-2 right-2 md:top-4 md:right-4 z-40 flex flex-col items-end max-w-[120px] md:max-w-[200px] pointer-events-none">
          <div className="w-full bg-black/30 rounded-xl p-1.5 md:p-2 h-24 md:h-32 overflow-hidden flex flex-col-reverse gap-1 pointer-events-auto border border-white/5">
@@ -553,91 +603,4 @@ const ZhaJinHuaGame: React.FC<ZhaJinHuaGameProps> = ({ onExit }) => {
               {pot > 0 && (
                   <div className="mt-2 md:mt-4 bg-black/40 px-4 py-1 md:px-6 md:py-2 rounded-full border border-yellow-500/30 flex items-center gap-2 shadow-[0_0_20px_rgba(234,179,8,0.2)] animate-bounce-slow">
                       <Coins className="text-yellow-400 w-4 h-4 md:w-6 md:h-6" />
-                      <span className="text-lg md:text-2xl font-mono text-yellow-100 font-bold">{pot}</span>
-                  </div>
-              )}
-           </div>
-
-           {players.map((p) => {
-               const relativePos = (p.id - myPlayerId + 4) % 4;
-               let posName: 'bottom' | 'right' | 'top' | 'left' = 'bottom';
-               if (relativePos === 1) posName = 'right';
-               if (relativePos === 2) posName = 'top';
-               if (relativePos === 3) posName = 'left';
-               return (
-                   <PlayerSeat 
-                    key={p.id} 
-                    player={p} 
-                    isDealer={dealerIndex === p.id} 
-                    isActive={turnIndex === p.id && gamePhase !== GamePhase.Idle && gamePhase !== GamePhase.Showdown} 
-                    position={posName}
-                    isWinner={p.status === PlayerStatus.Won}
-                    showCards={gamePhase === GamePhase.Showdown}
-                    isMe={p.id === myPlayerId}
-                   />
-               )
-           })}
-           
-           {dealingCard && (
-               <div 
-                 className="absolute top-0 left-1/2 w-8 h-12 md:w-10 md:h-14 bg-blue-600 border border-white rounded shadow-xl z-50 transition-all duration-200 ease-out"
-                 style={{ transform: `translate(${getPositionOffsets(dealingCard.targetId)[0]}px, ${getPositionOffsets(dealingCard.targetId)[1]}px)` }}
-               ></div>
-           )}
-           {flyingChips.map((chip) => {
-               const [x, y] = getPositionOffsets(chip.fromId);
-               return (
-                <div key={chip.id} className="absolute w-4 h-4 md:w-6 md:h-6 bg-yellow-500 rounded-full border-2 border-dashed border-yellow-200 shadow-lg z-50 flex items-center justify-center"
-                    style={{ animation: `flyToPot 0.5s forwards`, 
-                    // @ts-ignore 
-                    '--startX': `${x}px`, 
-                    // @ts-ignore
-                    '--startY': `${y}px` }}
-                ><style>{`@keyframes flyToPot { 0% { transform: translate(var(--startX), var(--startY)) scale(1); opacity: 1; } 100% { transform: translate(0, 0) scale(0.5); opacity: 0; } }`}</style></div>
-               );
-           })}
-            {winningChips && (
-                <div className="absolute inset-0 pointer-events-none z-50">
-                    {Array.from({ length: 8 }).map((_, i) => {
-                        const [destX, destY] = getPositionOffsets(winningChips.winnerId);
-                        return (
-                            <div key={i} className="absolute top-1/2 left-1/2 w-6 h-6 md:w-8 md:h-8 bg-yellow-400 rounded-full border-2 border-yellow-200 shadow-[0_0_15px_yellow]"
-                                style={{ animation: `flyToWinner 0.8s forwards ${i * 0.1}s`, 
-                                // @ts-ignore
-                                '--destX': `${destX}px`, 
-                                // @ts-ignore
-                                '--destY': `${destY}px` }}
-                            ><style>{`@keyframes flyToWinner { 0% { transform: translate(0, 0) scale(0.5); opacity: 1; } 80% { opacity: 1; } 100% { transform: translate(var(--destX), var(--destY)) scale(1); opacity: 0; } }`}</style></div>
-                        )
-                    })}
-                </div>
-            )}
-           {compareMode && (
-             <div className="absolute inset-0 bg-black/70 z-50 rounded-[100px] md:rounded-[180px] flex flex-col items-center justify-center animate-in fade-in p-4">
-                <h2 className="text-lg md:text-2xl font-bold text-white mb-4 md:mb-8 animate-pulse text-center">CHOOSE OPPONENT</h2>
-                <div className="flex gap-2 md:gap-4 flex-wrap justify-center">
-                    {activeOpponents.map(p => (
-                        <button key={p.id} onClick={() => { setCompareMode(false); handlePlayerAction(myPlayerId, 'Compare', p.id); }} className="w-16 h-16 md:w-24 md:h-24 rounded-full bg-red-600 hover:bg-red-500 border-2 md:border-4 border-white shadow-[0_0_20px_red] flex flex-col items-center justify-center transform hover:scale-110 transition-all">
-                            <img src={`https://api.dicebear.com/9.x/adventurer/svg?seed=${encodeURIComponent(p.name)}`} className="w-8 h-8 md:w-12 md:h-12 rounded-full mb-1" alt={p.name} />
-                            <span className="text-[8px] md:text-xs font-bold text-white bg-black/50 px-2 rounded max-w-full truncate">{p.name}</span>
-                        </button>
-                    ))}
-                </div>
-                <button onClick={() => setCompareMode(false)} className="mt-4 md:mt-8 text-gray-400 hover:text-white underline text-sm">Cancel</button>
-             </div>
-           )}
-        </div>
-      </div>
-
-      <GameControls
-        gamePhase={gamePhase} isMyTurn={isMyTurn} hasSeen={myPlayer.hasSeenCards} canLook={!myPlayer.hasSeenCards}
-        canCompare={activeOpponents.length > 0 && myPlayer.chips >= myCost * 2} costToCall={myCost} currentBet={currentBetUnit}
-        onFold={() => handlePlayerAction(myPlayerId, 'Fold')} onLook={() => handlePlayerAction(myPlayerId, 'Look')}
-        onCall={() => handlePlayerAction(myPlayerId, 'Call')} onRaise={() => handlePlayerAction(myPlayerId, 'Raise')}
-        onCompare={() => { if (activeOpponents.length === 1) handlePlayerAction(myPlayerId, 'Compare', activeOpponents[0].id); else setCompareMode(true); }}
-        onNextRound={startNewRound}
-      />
-    </div>
-  );
-};
-export default ZhaJinHuaGame;
+                      <span className="text-lg md:text-2xl font-mono text-yellow-100 font-
